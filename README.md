@@ -1,0 +1,124 @@
+# docket
+
+Agent-shaped task tracker with a TDD execution harness, for solo and small-team coding work.
+
+`docket` is a per-repo task store (single SQLite file, gitignored) plus a curated set of prompt templates that turn an agent's task pickup into a disciplined TDD loop. It complements git and GitHub — it does not replace them.
+
+## What docket owns vs. what it delegates
+
+**`docket` owns:**
+
+- Structured task definition with first-class `acceptance` (testable criteria) and `deps` fields
+- A `ready` queue: the next task whose deps are all `done`
+- Groups: a sequential-execution unit (multiple tasks, one branch, one PR)
+- Four authored prompts (`tdd-pursuit`, `create-task`, `commit`, `pr`) embedded in the binary
+
+**`docket` delegates:**
+
+- File-level history → git (`git log --grep='\[T-N\]'`)
+- Code review, discussion, approval → GitHub PRs
+- Project-level rollup → whatever PM tool you use
+
+**The line `docket` refuses to cross:** workflow-engine territory. No formulas, no swarms, no DSLs. Orchestration belongs in the shell that calls `docket ready` in a loop, not in `docket`.
+
+## Install
+
+From source for now (release plumbing is on the roadmap):
+
+```bash
+git clone <this repo>
+cd docket
+cargo install --path .
+```
+
+Single static binary. macOS and Linux supported.
+
+## Quick start
+
+```bash
+cd /path/to/your/repo
+docket init                              # creates .docket/db.sqlite, appends .docket/ to .gitignore
+
+docket add "uploader retries failed parts" \
+  --acceptance "retries each part up to 3x; succeeds if any part succeeds" \
+  --group "uploader-fixes"
+
+docket add "uploader emits per-part metrics" \
+  --acceptance "metric uploader_part_total has labels {status, attempt}" \
+  --deps T-1 \
+  --group "uploader-fixes"
+
+docket ready                              # T-1 only — T-2 is blocked by T-1
+docket done T-1                           # T-2 now ready
+docket ready                              # T-2 surfaces
+```
+
+## CLI
+
+| Verb | Purpose |
+|------|---------|
+| `docket init` | Create `.docket/db.sqlite` in current repo, append `.docket/` to `.gitignore` |
+| `docket add <title>` | Create a task; flags: `--body --acceptance --deps --priority --group` |
+| `docket ls` | List tasks; flags: `--status --group --json` |
+| `docket show T-N` | Full task with body, acceptance, deps with resolved states |
+| `docket ready` | Tasks with `status=open` and all deps `done` |
+| `docket blocked` | Inverse of ready: tasks with unmet deps (debug view) |
+| `docket status T-N <state>` | Set status (`open`, `in_progress`, `done`, or any string) |
+| `docket done T-N` | Convenience for `docket status T-N done` |
+| `docket rm T-N` | Delete a task |
+| `docket prompt <name>` | Print an embedded prompt (`tdd-pursuit`, `create-task`, `commit`, `pr`) |
+| `docket group new <name>` | Create a group; flags: `--branch --description` |
+| `docket group ls` | List groups with `done/total` task counts |
+| `docket group show <name>` | Group detail + tasks |
+| `docket group close <name>` | Mark group closed |
+
+Every list/show command supports `--json` for agent consumption.
+
+## Schema
+
+Two tables in `.docket/db.sqlite`:
+
+```
+tasks(id, title, body, acceptance, deps, status, priority, group_id, created_at, updated_at)
+groups(id, name UNIQUE, branch_name, description, state, created_at)
+```
+
+- `id` is integer-incrementing; rendered as `T-N`.
+- `deps` is a JSON array of integer task IDs (e.g. `[3, 5]`); the only link type is `blocks`.
+- `status` is `open | in_progress | done` by convention. `blocked` is *computed* from unmet deps, never stored.
+- `priority` is 0..4, default 2 (lower = more urgent, beads convention).
+- `group_id` is nullable — tasks don't have to be in a group.
+
+## Prompts
+
+Four authored prompts ship embedded in the binary, accessed via `docket prompt <name>`:
+
+- **`tdd-pursuit`** — the RED-GREEN-REFACTOR execution loop with five named anti-cheating disciplines (task-revision, test-revision, tautology, implementation-leak, horizontal-slice cheats), explicit asymmetry between modifying test vs. implementation, and escalation criteria for legitimate exits.
+- **`create-task`** — turn a one-line ask into a structured task with testable acceptance criteria.
+- **`commit`** — every commit during a task carries `[T-N]` so git history cross-links to `docket`.
+- **`pr`** — one PR per group at completion, summary aggregated from task bodies and acceptances.
+
+Sources at [`templates/`](./templates/). They're embedded into the binary via `include_str!` at build time — edit and rebuild to change them.
+
+## Cross-system link
+
+The single bridge between `docket` and git/GitHub is the **`[T-N]`** tag in commit messages. To find what changed for a task:
+
+```bash
+git log --grep='\[T-3\]'
+```
+
+`docket` does not track files-touched, commit SHAs, or PR URLs — git already does.
+
+## Design choices (load-bearing)
+
+- **Per-repo, gitignored `.docket/`.** Per-developer state, no binary merge conflicts. Like `.conductor/`, `.superset/`.
+- **Two tables, no archive, no audit, no comments, no labels.** Done tasks sit in `tasks` with `status=done`. Git is the activity log.
+- **Sequential execution, not parallel.** A group runs tasks one at a time on one branch; no atomic claims because there's nothing to coordinate against.
+- **One PR per group, not per task.** Three or four tasks usually batch into one branch and one PR. Per-task PRs would bloat the repo with review noise.
+- **`acceptance` as first-class field.** This is the contract `tdd-pursuit` enforces.
+- **Embedded prompts.** Source-of-truth is in the binary; edit `templates/` and rebuild to change them.
+
+## Roadmap
+
+See [ROADMAP.md](./ROADMAP.md) for the deferred items.

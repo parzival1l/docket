@@ -1,0 +1,22 @@
+[package]
+name = "docket"
+version = "0.1.0"
+edition = "2021"
+description = "Agent-shaped task tracker with TDD execution harness"
+
+[[bin]]
+name = "docket"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+anyhow = "1"
+chrono = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+lto = true
+strip = true
+opt-level = "z"
