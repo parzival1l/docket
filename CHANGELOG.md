@@ -26,7 +26,7 @@ Initial release. v1 CLI shell with embedded prompts and bundled SQLite store.
 
 ### Notes
 
-- Versioning starts at `0.0.x` deliberately — `0.1.0` is reserved for when `docket start` lands and the loop is dogfood-proven.
+- Versioning starts at `0.0.x` deliberately. Every shipped item bumps the patch (0.0.2, 0.0.3, …). The cut to `0.1.0` is **maintainer judgment, not a feature checklist** — it happens when the loop feels solid for daily use. `docket start` landing is the most likely trigger but is not by itself sufficient.
 
 [Unreleased]: https://github.com/parzival1l/docket/compare/v0.0.1...HEAD
 [0.0.1]: https://github.com/parzival1l/docket/releases/tag/v0.0.1
