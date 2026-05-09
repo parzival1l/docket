@@ -9,6 +9,7 @@
       "name": "docket",
       "source": "./plugin",
       "description": "Turn design discussions into structured docket tasks; in-session twin of `docket start`.",
+      "version": "0.0.1",
       "homepage": "https://github.com/parzival1l/docket",
       "repository": "https://github.com/parzival1l/docket",
       "license": "MIT",

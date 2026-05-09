@@ -111,10 +111,15 @@ If the work fits cleanly inside an existing CLI verb, just document the verb in 
 
 ## Cutting a release
 
-The plugin currently ships co-located with the docket repo. When the plugin reaches a milestone worth tagging:
+The plugin uses **pinned versioning**, not auto-SHA. Installed users only see a new build when the version string bumps — pushing a commit without a bump does nothing for them. This is intentional: it lets us iterate on `main` without dripping half-finished commits to anyone running `/plugin marketplace update docket`.
 
-1. Bump `version` in `.claude-plugin/plugin.json`.
-2. Add a CHANGELOG entry under the docket repo's `CHANGELOG.md` prefixed `plugin:`.
-3. Commit alongside any new command files.
+The plugin's version tracks the CLI's `Cargo.toml` version one-to-one. When you cut a CLI release:
 
-No separate tag flow today — the plugin's versioning piggybacks on docket's. Revisit if the plugin grows independent of the CLI.
+1. Bump `version` in `Cargo.toml` and `Cargo.lock` (existing flow).
+2. Bump `version` in **both** `plugin/.claude-plugin/plugin.json` AND the plugin entry in `.claude-plugin/marketplace.json`. They must match.
+3. Add a CHANGELOG entry under `CHANGELOG.md`. If the change is plugin-only, prefix the bullet with `plugin:` so the diff is greppable.
+4. Commit, tag (`v0.0.2`), push tag — the existing `release.yml` workflow handles the CLI binary release.
+
+The plugin doesn't need its own tag — `/plugin marketplace update docket` re-fetches `main` and reads the bumped version from the manifests. The CLI tag is the single source of truth.
+
+Revisit this rule only if the plugin starts shipping changes independently of the CLI (e.g. a slash-command-only fix). If that happens repeatedly, decouple the version fields and start a separate `plugin-vX.Y.Z` tag series.

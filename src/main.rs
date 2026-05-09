@@ -108,7 +108,12 @@ enum Command {
         name: String,
     },
     /// Start a task: assemble its prompt and print to stdout, mark in_progress
-    Start { id: String },
+    Start {
+        id: String,
+        /// Open a new tmux window in the current session and deliver the prompt to it
+        #[arg(long)]
+        tmux: bool,
+    },
     /// Group operations
     Group {
         #[command(subcommand)]
@@ -562,7 +567,28 @@ fn cmd_prompt(name: String) -> Result<()> {
     Ok(())
 }
 
-fn cmd_start(id: String) -> Result<()> {
+fn assemble_prompt(t: &Task) -> String {
+    let body = t.body.as_deref().unwrap_or("(no body)");
+    let acceptance = t.acceptance.as_deref().unwrap_or("(no acceptance criteria)");
+    format!(
+        "# Task {}: {}\n\n## Body\n{}\n\n## Acceptance\n{}\n\n{}",
+        fmt_id(t.id),
+        t.title,
+        body,
+        acceptance,
+        PROMPT_TDD
+    )
+}
+
+fn mark_in_progress(conn: &Connection, id: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE tasks SET status = 'in_progress', updated_at = ?1 WHERE id = ?2",
+        params![now(), id],
+    )?;
+    Ok(())
+}
+
+fn cmd_start(id: String, tmux: bool) -> Result<()> {
     let id = parse_id(&id)?;
     let conn = open_db()?;
     let all = load_all_tasks(&conn)?;
@@ -579,22 +605,58 @@ fn cmd_start(id: String) -> Result<()> {
         ));
     }
 
-    let body = t.body.as_deref().unwrap_or("(no body)");
-    let acceptance = t.acceptance.as_deref().unwrap_or("(no acceptance criteria)");
+    let prompt = assemble_prompt(t);
 
-    print!(
-        "# Task {}: {}\n\n## Body\n{}\n\n## Acceptance\n{}\n\n{}",
-        fmt_id(t.id),
-        t.title,
-        body,
-        acceptance,
-        PROMPT_TDD
-    );
+    if tmux {
+        if std::env::var_os("TMUX").is_none() {
+            return Err(anyhow!(
+                "not inside a tmux session — run `docket start {} | claude` or start tmux first",
+                fmt_id(t.id)
+            ));
+        }
+        deliver_via_tmux(t.id, &prompt)?;
+        mark_in_progress(&conn, t.id)?;
+        return Ok(());
+    }
 
-    conn.execute(
-        "UPDATE tasks SET status = 'in_progress', updated_at = ?1 WHERE id = ?2",
-        params![now(), t.id],
-    )?;
+    print!("{}", prompt);
+    mark_in_progress(&conn, t.id)?;
+    Ok(())
+}
+
+fn deliver_via_tmux(id: i64, prompt: &str) -> Result<()> {
+    let ts = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+    let prompt_path = std::env::temp_dir().join(format!("docket-{}-{}.md", fmt_id(id), ts));
+    fs::write(&prompt_path, prompt)
+        .with_context(|| format!("failed to write prompt tempfile {}", prompt_path.display()))?;
+
+    let window_name = format!("docket {}", fmt_id(id));
+    let new_window = std::process::Command::new("tmux")
+        .args(["new-window", "-n", &window_name, "-P", "-F", "#{window_id}"])
+        .output()
+        .context("failed to invoke tmux new-window")?;
+    if !new_window.status.success() {
+        return Err(anyhow!(
+            "tmux new-window failed: {}",
+            String::from_utf8_lossy(&new_window.stderr)
+        ));
+    }
+    let window_id = String::from_utf8_lossy(&new_window.stdout).trim().to_string();
+    if window_id.is_empty() {
+        return Err(anyhow!("tmux new-window did not return a window id"));
+    }
+
+    let cmd = format!("claude < {}", prompt_path.display());
+    let send = std::process::Command::new("tmux")
+        .args(["send-keys", "-t", &window_id, &cmd, "Enter"])
+        .output()
+        .context("failed to invoke tmux send-keys")?;
+    if !send.status.success() {
+        return Err(anyhow!(
+            "tmux send-keys failed: {}",
+            String::from_utf8_lossy(&send.stderr)
+        ));
+    }
     Ok(())
 }
 
@@ -767,7 +829,7 @@ fn main() -> Result<()> {
         Command::Done { id } => cmd_done(id)?,
         Command::Rm { id } => cmd_rm(id)?,
         Command::Prompt { name } => cmd_prompt(name)?,
-        Command::Start { id } => cmd_start(id)?,
+        Command::Start { id, tmux } => cmd_start(id, tmux)?,
         Command::Group { action } => match action {
             GroupCommand::New {
                 name,
