@@ -1,0 +1,18 @@
+{
+  "name": "docket",
+  "description": "Docket plugin marketplace — slash commands that compose docket CLI verbs with model behavior.",
+  "owner": {
+    "name": "parzival1l"
+  },
+  "plugins": [
+    {
+      "name": "docket",
+      "source": "./plugin",
+      "description": "Turn design discussions into structured docket tasks; in-session twin of `docket start`.",
+      "homepage": "https://github.com/parzival1l/docket",
+      "repository": "https://github.com/parzival1l/docket",
+      "license": "MIT",
+      "keywords": ["docket", "task-tracker", "tdd"]
+    }
+  ]
+}

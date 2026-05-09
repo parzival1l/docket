@@ -49,6 +49,21 @@ cargo install --path .          # → ~/.cargo/bin/docket
 
 Single static binary. Tier-1 targets: macOS (x86_64, aarch64) and Linux (x86_64, aarch64).
 
+### Plugin (Claude Code)
+
+`docket` ships with a Claude Code plugin that exposes the CLI verbs as slash commands inside an active session — `/docket:create-task`, `/docket:start T-N`. The plugin and the CLI are independent installs; the plugin shells out to the `docket` binary on your `$PATH`.
+
+Install from inside Claude Code:
+
+```
+/plugin marketplace add parzival1l/docket
+/plugin install docket@docket
+```
+
+That registers the marketplace and enables the plugin in `~/.claude/settings.json`. Subsequent native sessions pick it up automatically. Update with `/plugin marketplace update docket`; pick up edits inside an active session with `/plugin reload`.
+
+See [`plugin/CONVENTIONS.md`](./plugin/CONVENTIONS.md) for the pattern when adding new commands.
+
 ### Cutting a release (maintainer)
 
 Releases are tag-driven — pushing a `v*` tag triggers `.github/workflows/release.yml`, which cross-builds all four targets, generates checksums, and publishes a GitHub Release with notes pulled from the matching `## [VERSION]` section of [`CHANGELOG.md`](./CHANGELOG.md):

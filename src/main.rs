@@ -107,6 +107,8 @@ enum Command {
         /// One of: tdd-pursuit, create-task, commit, pr
         name: String,
     },
+    /// Start a task: assemble its prompt and print to stdout, mark in_progress
+    Start { id: String },
     /// Group operations
     Group {
         #[command(subcommand)]
@@ -560,6 +562,42 @@ fn cmd_prompt(name: String) -> Result<()> {
     Ok(())
 }
 
+fn cmd_start(id: String) -> Result<()> {
+    let id = parse_id(&id)?;
+    let conn = open_db()?;
+    let all = load_all_tasks(&conn)?;
+    let t = all
+        .iter()
+        .find(|t| t.id == id)
+        .ok_or_else(|| anyhow!("{} not found", fmt_id(id)))?;
+
+    if t.status == "done" {
+        return Err(anyhow!(
+            "{} is done — run `docket status {} open` first to reopen it",
+            fmt_id(t.id),
+            fmt_id(t.id)
+        ));
+    }
+
+    let body = t.body.as_deref().unwrap_or("(no body)");
+    let acceptance = t.acceptance.as_deref().unwrap_or("(no acceptance criteria)");
+
+    print!(
+        "# Task {}: {}\n\n## Body\n{}\n\n## Acceptance\n{}\n\n{}",
+        fmt_id(t.id),
+        t.title,
+        body,
+        acceptance,
+        PROMPT_TDD
+    );
+
+    conn.execute(
+        "UPDATE tasks SET status = 'in_progress', updated_at = ?1 WHERE id = ?2",
+        params![now(), t.id],
+    )?;
+    Ok(())
+}
+
 fn cmd_group_new(
     name: String,
     branch: Option<String>,
@@ -729,6 +767,7 @@ fn main() -> Result<()> {
         Command::Done { id } => cmd_done(id)?,
         Command::Rm { id } => cmd_rm(id)?,
         Command::Prompt { name } => cmd_prompt(name)?,
+        Command::Start { id } => cmd_start(id)?,
         Command::Group { action } => match action {
             GroupCommand::New {
                 name,

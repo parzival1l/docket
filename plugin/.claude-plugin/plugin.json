@@ -1,7 +1,6 @@
 {
   "name": "docket",
   "description": "Turn design discussions into structured docket tasks with testable acceptance criteria.",
-  "version": "0.0.1",
   "author": {
     "name": "parzival1l"
   },
