@@ -2,13 +2,17 @@
 
 Tracked deferrals from the v1 design pass. Items live here so they don't drift out of conversation history.
 
+## Shipped
+
+- [x] **Release plumbing** — tag-triggered GitHub Actions workflow at `.github/workflows/release.yml`, cross-builds for `{macOS, Linux} × {x86_64, aarch64}`, publishes a GitHub Release with SHA-256 checksums and notes pulled from `CHANGELOG.md`. `install.sh` handles `curl | bash` install with checksum verification.
+
 ## v0.2 — next iteration
 
 - [ ] **`docket start <task>`** — single-task spawn. Auto-detects terminal multiplexer (tmux / zellij / wezterm / iTerm) and opens a fresh Claude session in a new window/tab with `docket show T-N --as-prompt` injected. Strictly simpler than `docket work` — single task, no dep ordering, no group-completion check. Probably the right v0.2 first step.
 - [ ] **`docket work <group>`** — the sequential execution loop, building on `docket start`. Spawns a fresh Claude session **in a new tmux window** per task in dep order, single branch, one PR at end. Each spawned session receives the task body + acceptance + the `tdd-pursuit` prompt. The mechanism is decided (tmux + Claude); the implementation work is deferred. This is the load-bearing differentiator vs. beads.
 - [ ] **Tests for `docket` itself** — use its own TDD harness on itself. Cargo + `assert_cmd` + `tempfile` for end-to-end coverage of every CLI verb.
 - [ ] **`AGENTS.md` generation on `docket init`** — write a small doc to repo root describing the `[T-N]` commit convention, the `docket ready` loop, and the four prompts so any agent landing in the repo gets oriented without us having to brief it.
-- [ ] **Release plumbing** — GitHub Releases, cross-compile via CI (Linux x86_64/aarch64, macOS x86_64/aarch64), `curl | sh` install script.
+- [ ] **`docket update` / `changelog` / `future` subcommands** — port from threadhop's surface. `update` checks GitHub Releases and self-replaces (`self_update` crate); `changelog` and `future` print embedded `CHANGELOG.md` / top-N `ROADMAP.md` entries. Companion: 24h update-check nudge on next CLI invocation, suppressed in pipelines and when `DOCKET_NO_UPDATE_CHECK=1`.
 - [ ] **`audit` prompt** — placeholder mentioned during design. Two candidate roles surfaced: (1) **post-hoc anti-cheat sniff** — review the diff and tests for evidence of any of the five named cheats from `tdd-pursuit.md`; (2) **planning-time validation** — verify that acceptance criteria are testable before `docket add` actually inserts the task. Decide which role it plays (they're different prompts) before writing.
 
 ## v0.3+ — deferred from design

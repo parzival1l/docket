@@ -23,15 +23,44 @@ Agent-shaped task tracker with a TDD execution harness, for solo and small-team 
 
 ## Install
 
-From source for now (release plumbing is on the roadmap):
+### Quick install (recommended)
 
 ```bash
-git clone <this repo>
-cd docket
-cargo install --path .
+curl -LsSf https://raw.githubusercontent.com/parzival1l/docket/main/install.sh | bash
 ```
 
-Single static binary. macOS and Linux supported.
+Detects your platform, downloads the matching binary from the latest GitHub Release, verifies its SHA-256, and drops `docket` into `~/.local/bin`. Re-run any time to update.
+
+Make sure `~/.local/bin` is on your `$PATH`:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+To pin a specific version: `bash -s -- --version v0.0.1`. To install elsewhere: `DOCKET_INSTALL_DIR=/somewhere/bin bash`.
+
+### From source
+
+```bash
+git clone https://github.com/parzival1l/docket.git
+cd docket
+cargo install --path .          # → ~/.cargo/bin/docket
+```
+
+Single static binary. Tier-1 targets: macOS (x86_64, aarch64) and Linux (x86_64, aarch64).
+
+### Cutting a release (maintainer)
+
+Releases are tag-driven — pushing a `v*` tag triggers `.github/workflows/release.yml`, which cross-builds all four targets, generates checksums, and publishes a GitHub Release with notes pulled from the matching `## [VERSION]` section of [`CHANGELOG.md`](./CHANGELOG.md):
+
+```bash
+# 1. Bump version in Cargo.toml + Cargo.lock + CHANGELOG.md
+# 2. Commit, then:
+git tag v0.0.2
+git push origin main v0.0.2
+```
+
+See [`CHANGELOG.md`](./CHANGELOG.md) for the version history.
 
 ## Quick start
 
