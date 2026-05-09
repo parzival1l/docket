@@ -10,6 +10,8 @@ GitHub Release body for the matching tag — keep entries written for that audie
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-05-09
+
 ## [0.0.1] - 2026-05-09
 
 Initial release. v1 CLI shell with embedded prompts and bundled SQLite store.
@@ -28,5 +30,6 @@ Initial release. v1 CLI shell with embedded prompts and bundled SQLite store.
 
 - Versioning starts at `0.0.x` deliberately. Every shipped item bumps the patch (0.0.2, 0.0.3, …). The cut to `0.1.0` is **maintainer judgment, not a feature checklist** — it happens when the loop feels solid for daily use. `docket start` landing is the most likely trigger but is not by itself sufficient.
 
-[Unreleased]: https://github.com/parzival1l/docket/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/parzival1l/docket/compare/v0.0.2...HEAD
+[0.0.2]: https://github.com/parzival1l/docket/releases/tag/v0.0.2
 [0.0.1]: https://github.com/parzival1l/docket/releases/tag/v0.0.1
