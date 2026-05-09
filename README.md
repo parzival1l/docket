@@ -66,16 +66,39 @@ See [`plugin/CONVENTIONS.md`](./plugin/CONVENTIONS.md) for the pattern when addi
 
 ### Cutting a release (maintainer)
 
-Releases are tag-driven — pushing a `v*` tag triggers `.github/workflows/release.yml`, which cross-builds all four targets, generates checksums, and publishes a GitHub Release with notes pulled from the matching `## [VERSION]` section of [`CHANGELOG.md`](./CHANGELOG.md):
+Releases are tag-driven, but tagging itself is automated. You drive a single human signal — *"the next version is X"* — and the rest is mechanical.
+
+One-time setup:
 
 ```bash
-# 1. Bump version in Cargo.toml + Cargo.lock + CHANGELOG.md
-# 2. Commit, then:
-git tag v0.0.2
-git push origin main v0.0.2
+cargo install cargo-release
 ```
 
-See [`CHANGELOG.md`](./CHANGELOG.md) for the version history.
+The flow:
+
+```bash
+# 1. Start a release branch off main
+git checkout main && git pull
+git checkout -b release/0.0.2
+
+# 2. cargo-release bumps Cargo.toml + Cargo.lock, splits CHANGELOG.md
+#    [Unreleased] into a new [0.0.2] - YYYY-MM-DD section, and commits as
+#    `release: 0.0.2`. It does NOT push or tag (see release.toml).
+cargo release 0.0.2 --execute
+
+# 3. Edit the new ## [0.0.2] section in CHANGELOG.md to fill in entries,
+#    then `git commit --amend` (or add a follow-up commit on the branch).
+
+# 4. Push the branch and open a PR
+git push -u origin release/0.0.2
+gh pr create --title "release: 0.0.2"
+```
+
+Merging the PR fires `.github/workflows/auto-tag.yml`, which reads the version from `Cargo.toml`, creates and pushes `v0.0.2`, then triggers `release.yml`. That cross-builds all four targets, generates checksums, and publishes a GitHub Release with notes pulled from the matching `## [0.0.2]` section of [`CHANGELOG.md`](./docs/CHANGELOG.md).
+
+To re-release an existing tag (e.g. after fixing the build pipeline): `gh workflow run release.yml -f tag=v0.0.2`.
+
+See [`CHANGELOG.md`](./docs/CHANGELOG.md) for version history and [`release.toml`](./release.toml) for the cargo-release config.
 
 ## Quick start
 
@@ -165,4 +188,4 @@ git log --grep='\[T-3\]'
 
 ## Roadmap
 
-See [ROADMAP.md](./ROADMAP.md) for the deferred items.
+See [ROADMAP.md](./docs/ROADMAP.md) for the deferred items.

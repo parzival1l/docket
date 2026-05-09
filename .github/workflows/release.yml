@@ -103,18 +103,18 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Extract release notes from CHANGELOG.md
+      - name: Extract release notes from docs/CHANGELOG.md
         shell: bash
         run: |
           set -euo pipefail
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           VERSION="${TAG#v}"
-          if [ -f CHANGELOG.md ]; then
+          if [ -f docs/CHANGELOG.md ]; then
             awk -v ver="$VERSION" '
               $0 ~ "^## \\["ver"\\]" { in_section=1; next }
               in_section && /^## \[/ { exit }
               in_section { print }
-            ' CHANGELOG.md > release-notes.md
+            ' docs/CHANGELOG.md > release-notes.md
           fi
           if [ ! -s release-notes.md ]; then
             echo "Release ${TAG}." > release-notes.md

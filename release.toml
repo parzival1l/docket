@@ -1,0 +1,18 @@
+# cargo-release configuration
+# Flow: bump on a release/* branch (this file), PR-merge to main,
+# auto-tag.yml then creates the tag and triggers release.yml.
+
+publish = false                                 # not a crates.io crate
+push = false                                    # branch is pushed manually via PR
+tag = false                                     # auto-tag.yml creates the tag after merge
+sign-commit = false
+sign-tag = false
+pre-release-commit-message = "release: {{version}}"
+allow-branch = ["release/*", "main"]
+
+pre-release-replacements = [
+  # Insert a new version section under [Unreleased]
+  { file = "docs/CHANGELOG.md", search = "## \\[Unreleased\\]", replace = "## [Unreleased]\n\n## [{{version}}] - {{date}}", exactly = 1 },
+  # Bump the [Unreleased] compare link and add a release link for the new version
+  { file = "docs/CHANGELOG.md", search = "\\[Unreleased\\]: https://github\\.com/parzival1l/docket/compare/v[0-9.]+\\.\\.\\.HEAD", replace = "[Unreleased]: https://github.com/parzival1l/docket/compare/v{{version}}...HEAD\n[{{version}}]: https://github.com/parzival1l/docket/releases/tag/v{{version}}", exactly = 1 },
+]
