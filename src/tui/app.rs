@@ -239,8 +239,32 @@ impl App {
         }
     }
 
-    fn handle_confirm(&mut self, _key: KeyEvent) {
-        // Real handler lands in Task 7.
+    fn handle_confirm(&mut self, key: KeyEvent) {
+        let confirmed = matches!(key.code, KeyCode::Char('y') | KeyCode::Enter);
+        let cancelled = matches!(
+            key.code,
+            KeyCode::Char('n') | KeyCode::Char('q') | KeyCode::Esc
+        );
+
+        if !confirmed && !cancelled {
+            return;
+        }
+
+        if confirmed {
+            let action = match &self.screen {
+                Screen::Confirm(a) => a.clone(),
+                _ => return,
+            };
+            match action {
+                PendingAction::DeleteTask { id, .. } => {
+                    if crate::db::delete_task(&self.conn, id).is_ok() {
+                        let _ = self.reload();
+                    }
+                }
+            }
+        }
+
+        self.screen = Screen::Main;
     }
 
     fn handle_filter_prompt(&mut self, key: KeyEvent) {
@@ -664,6 +688,65 @@ mod tests {
         let mut app = mem_app();
         app.handle_key(key(KeyCode::Char('x')));
         assert_eq!(app.screen, Screen::Main);
+    }
+
+    #[test]
+    fn confirm_y_deletes_task_and_returns_to_main() {
+        let mut app = mem_app_with(&[("a", "open", 2), ("b", "open", 2)]);
+        let id_to_delete = app.selected_task().unwrap().id;
+        app.handle_key(key(KeyCode::Char('x')));
+        app.handle_key(key(KeyCode::Char('y')));
+        assert_eq!(app.screen, Screen::Main);
+        assert_eq!(app.tasks.len(), 1);
+        assert!(app.tasks.iter().all(|t| t.id != id_to_delete));
+    }
+
+    #[test]
+    fn confirm_enter_deletes_task_and_returns_to_main() {
+        let mut app = mem_app_with(&[("a", "open", 2)]);
+        app.handle_key(key(KeyCode::Char('x')));
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(app.screen, Screen::Main);
+        assert!(app.tasks.is_empty());
+    }
+
+    #[test]
+    fn confirm_n_cancels_and_keeps_task() {
+        let mut app = mem_app_with(&[("a", "open", 2)]);
+        app.handle_key(key(KeyCode::Char('x')));
+        app.handle_key(key(KeyCode::Char('n')));
+        assert_eq!(app.screen, Screen::Main);
+        assert_eq!(app.tasks.len(), 1);
+    }
+
+    #[test]
+    fn confirm_esc_cancels_and_keeps_task() {
+        let mut app = mem_app_with(&[("a", "open", 2)]);
+        app.handle_key(key(KeyCode::Char('x')));
+        app.handle_key(key(KeyCode::Esc));
+        assert_eq!(app.screen, Screen::Main);
+        assert_eq!(app.tasks.len(), 1);
+    }
+
+    #[test]
+    fn confirm_q_cancels_and_keeps_task() {
+        let mut app = mem_app_with(&[("a", "open", 2)]);
+        app.handle_key(key(KeyCode::Char('x')));
+        app.handle_key(key(KeyCode::Char('q')));
+        assert_eq!(app.screen, Screen::Main);
+        assert!(!app.should_quit);
+        assert_eq!(app.tasks.len(), 1);
+    }
+
+    #[test]
+    fn confirm_delete_clamps_cursor_when_last_task_removed() {
+        let mut app = mem_app_with(&[("a", "open", 2), ("b", "open", 2)]);
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.cursor, 1);
+        app.handle_key(key(KeyCode::Char('x')));
+        app.handle_key(key(KeyCode::Char('y')));
+        assert_eq!(app.cursor, 0);
+        assert_eq!(app.tasks.len(), 1);
     }
 
     #[test]
