@@ -14,6 +14,7 @@ pub mod rm;
 pub mod show;
 pub mod start;
 pub mod status;
+pub mod tui;
 
 pub(crate) fn print_task_row(t: &Task) {
     let group_str = t
@@ -111,6 +112,8 @@ pub enum Command {
         #[command(subcommand)]
         action: GroupCommand,
     },
+    /// Open the interactive TUI
+    Tui,
 }
 
 #[derive(Subcommand)]
@@ -168,5 +171,6 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             GroupCommand::Show { name, json } => group::show(name, json),
             GroupCommand::Close { name } => group::close(name),
         },
+        Command::Tui => tui::run(),
     }
 }
