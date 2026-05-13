@@ -750,6 +750,28 @@ mod tests {
     }
 
     #[test]
+    fn confirm_modal_renders_with_task_title() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut app = mem_app_with(&[("buy milk", "open", 2)]);
+        app.handle_key(key(KeyCode::Char('x')));
+        let backend = TestBackend::new(120, 60);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let s: String = buf
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(s.contains("delete task"));
+        assert!(s.contains("buy milk"));
+        assert!(s.contains("y/Enter"));
+        assert!(s.contains("n/Esc"));
+    }
+
+    #[test]
     fn main_screen_renders_top_bar_and_footer() {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
