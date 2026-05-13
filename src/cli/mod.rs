@@ -1,6 +1,8 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+pub mod init;
+
 #[derive(Parser)]
 #[command(name = "docket", version, about = "Agent-shaped task tracker with TDD execution harness")]
 pub struct Cli {
@@ -110,7 +112,7 @@ pub enum GroupCommand {
 
 pub fn dispatch(cli: Cli) -> Result<()> {
     match cli.command {
-        Command::Init => crate::cmd_init(),
+        Command::Init => init::run(),
         Command::Add {
             title,
             body,

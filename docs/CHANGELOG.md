@@ -12,6 +12,25 @@ GitHub Release body for the matching tag — keep entries written for that audie
 
 ## [0.0.2] - 2026-05-09
 
+The handoff release. Closes the loop between picking a task and handing it to an agent — `docket start` assembles a task's body, acceptance, and the embedded `tdd-pursuit` discipline into a single ready-to-pipe brief, optionally delivered into a fresh tmux window. Also lands the Claude Code plugin and stands up tag-driven release automation so future versions ship from a two-command flow.
+
+### Added
+
+- `docket start <id>` — assembles `# Task T-N: <title>`, `## Body`, `## Acceptance`, and the verbatim `tdd-pursuit` template into a single stdout blob. Composes with pipes/redirects: `docket start T-N | claude`, `docket start T-N | pbcopy`, `docket start T-N > /tmp/p.md`. Transitions the task to `in_progress` and bumps `updated_at`. Refuses `done` tasks with a hint at `docket status`. Accepts both `T-3` and `3` ID forms.
+- `docket start --tmux` — opens the brief in a fresh tmux window, delivering the prompt to a new shell ready for an agent invocation.
+- Claude Code plugin (`/docket:create-task`, `/docket:start T-N`) — exposes the CLI verbs as slash commands inside an active session. Installable via `/plugin marketplace add parzival1l/docket` then `/plugin install docket@docket`.
+- Hermetic integration test suite for `docket start` — 7 tests covering each acceptance behavior end-to-end against the built binary.
+
+### Changed
+
+- Documentation reorganized into `docs/` — `CHANGELOG.md`, `RESEARCH.md`, `RESEARCH-STORAGE.md`, `ROADMAP.md` moved out of the repo root. Only `README.md` and `LICENSE` remain at the top level.
+- Release pipeline now reads release notes from `docs/CHANGELOG.md`.
+
+### Release automation
+
+- `release.toml` — `cargo-release` configuration that bumps `Cargo.toml` + `Cargo.lock`, splits `## [Unreleased]` in CHANGELOG into a new dated version section, and commits as `release: <version>` without tagging or pushing.
+- `.github/workflows/auto-tag.yml` — fires on push to `main`, reads the version from `Cargo.toml`, creates and pushes the matching `v<version>` tag if absent, then dispatches `release.yml`. Cuts the maintainer flow to two commands: `cargo release X.Y.Z --execute` then `git push origin main`.
+
 ## [0.0.1] - 2026-05-09
 
 Initial release. v1 CLI shell with embedded prompts and bundled SQLite store.

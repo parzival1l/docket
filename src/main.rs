@@ -11,10 +11,7 @@ mod db;
 mod model;
 mod prompts;
 
-use db::{
-    find_repo_root, get_or_create_group, init_schema, load_all_groups, load_all_tasks,
-    load_group_by_name, open_db,
-};
+use db::{get_or_create_group, load_all_groups, load_all_tasks, load_group_by_name, open_db};
 use model::{fmt_id, now, parse_deps, parse_id, Group, Task};
 use prompts::{assemble_prompt, PROMPT_COMMIT, PROMPT_CREATE_TASK, PROMPT_PR, PROMPT_TDD};
 
@@ -35,48 +32,6 @@ fn print_task_row(t: &Task) {
 }
 
 // === commands ===
-
-pub(crate) fn cmd_init() -> Result<()> {
-    let cwd = std::env::current_dir()?;
-    let root = find_repo_root(&cwd).ok_or_else(|| anyhow!("not in a git repo"))?;
-    let dir = root.join(".docket");
-    let db = dir.join("db.sqlite");
-
-    if !dir.exists() {
-        fs::create_dir_all(&dir)?;
-        println!("created {}", dir.display());
-    }
-
-    let conn = Connection::open(&db)?;
-    init_schema(&conn)?;
-    println!("initialized {}", db.display());
-
-    let gi = root.join(".gitignore");
-    let line = ".docket/";
-    let needs_append = if gi.exists() {
-        let c = fs::read_to_string(&gi)?;
-        !c.lines().any(|l| l.trim() == line)
-    } else {
-        true
-    };
-    if needs_append {
-        let mut content = if gi.exists() {
-            fs::read_to_string(&gi)?
-        } else {
-            String::new()
-        };
-        if !content.is_empty() && !content.ends_with('\n') {
-            content.push('\n');
-        }
-        content.push_str(line);
-        content.push('\n');
-        fs::write(&gi, content)?;
-        println!("added `.docket/` to {}", gi.display());
-    } else {
-        println!(".gitignore already excludes .docket/");
-    }
-    Ok(())
-}
 
 pub(crate) fn cmd_add(
     title: String,
