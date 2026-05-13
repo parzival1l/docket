@@ -13,7 +13,6 @@ pub enum FilterKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PendingAction {
-    #[allow(dead_code)] // constructed in PR-4 Task 6
     DeleteTask { id: i64, title: String },
 }
 
@@ -22,7 +21,6 @@ pub enum Screen {
     Main,
     Help,
     FilterPrompt { kind: FilterKind, input: String },
-    #[allow(dead_code)] // constructed in PR-4 Task 6
     Confirm(PendingAction),
 }
 

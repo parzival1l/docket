@@ -1,7 +1,6 @@
 use crate::db::{load_all_tasks, open_db};
 use crate::model::Task;
 use crate::tui::filters::{filtered_indices, Filters};
-#[allow(unused_imports)] // PendingAction is referenced starting in Task 6
 use crate::tui::screens::{FilterKind, PendingAction, Screen};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -185,6 +184,9 @@ impl App {
             KeyCode::Char('d') => {
                 self.mark_done();
             }
+            KeyCode::Char('x') => {
+                self.open_delete_confirm();
+            }
             _ => {}
         }
     }
@@ -210,6 +212,16 @@ impl App {
             let _ = self.reload();
             self.preserve_cursor_on(id);
         }
+    }
+
+    fn open_delete_confirm(&mut self) {
+        let Some(task) = self.selected_task() else {
+            return;
+        };
+        self.screen = Screen::Confirm(PendingAction::DeleteTask {
+            id: task.id,
+            title: task.title.clone(),
+        });
     }
 
     fn handle_detail(&mut self, key: KeyEvent) {
@@ -631,6 +643,27 @@ mod tests {
         let mut app = mem_app();
         app.handle_key(key(KeyCode::Char('d')));
         assert!(app.selected_task().is_none());
+    }
+
+    #[test]
+    fn x_opens_confirm_modal_for_cursor_task() {
+        let mut app = mem_app_with(&[("hello", "open", 2)]);
+        let id = app.selected_task().unwrap().id;
+        app.handle_key(key(KeyCode::Char('x')));
+        match &app.screen {
+            Screen::Confirm(PendingAction::DeleteTask { id: got_id, title }) => {
+                assert_eq!(*got_id, id);
+                assert_eq!(title, "hello");
+            }
+            other => panic!("expected Confirm(DeleteTask), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn x_on_empty_list_is_a_noop() {
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('x')));
+        assert_eq!(app.screen, Screen::Main);
     }
 
     #[test]
