@@ -18,21 +18,6 @@ use prompts::{assemble_prompt, PROMPT_COMMIT, PROMPT_CREATE_TASK, PROMPT_PR, PRO
 
 // === commands ===
 
-pub(crate) fn cmd_status(id: String, state: String) -> Result<()> {
-    let id = parse_id(&id)?;
-    let conn = open_db()?;
-    let n = db::set_status(&conn, id, &state)?;
-    if n == 0 {
-        return Err(anyhow!("{} not found", fmt_id(id)));
-    }
-    println!("{} -> {}", fmt_id(id), state);
-    Ok(())
-}
-
-pub(crate) fn cmd_done(id: String) -> Result<()> {
-    cmd_status(id, "done".into())
-}
-
 pub(crate) fn cmd_rm(id: String) -> Result<()> {
     let id = parse_id(&id)?;
     let conn = open_db()?;

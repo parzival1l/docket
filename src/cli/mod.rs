@@ -9,6 +9,7 @@ pub mod init;
 pub mod ls;
 pub mod ready;
 pub mod show;
+pub mod status;
 
 pub(crate) fn print_task_row(t: &Task) {
     let group_str = t
@@ -148,8 +149,8 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         Command::Show { id, json } => show::run(id, json),
         Command::Ready { group, json } => ready::run(group, json),
         Command::Blocked { group, json } => blocked::run(group, json),
-        Command::Status { id, state } => crate::cmd_status(id, state),
-        Command::Done { id } => crate::cmd_done(id),
+        Command::Status { id, state } => status::run(id, state),
+        Command::Done { id } => status::done(id),
         Command::Rm { id } => crate::cmd_rm(id),
         Command::Prompt { name } => crate::cmd_prompt(name),
         Command::Start { id, tmux } => crate::cmd_start(id, tmux),
