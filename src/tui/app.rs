@@ -14,6 +14,12 @@ pub enum Pane {
     Detail,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StartRequest {
+    pub id: i64,
+    pub tmux: bool,
+}
+
 fn next_status(current: &str) -> &'static str {
     match current {
         "open" => "in_progress",
@@ -32,6 +38,7 @@ pub struct App {
     pub screen: Screen,
     pub pending_chord: Option<char>,
     pub should_quit: bool,
+    pub pending_start: Option<StartRequest>,
 }
 
 impl App {
@@ -47,6 +54,7 @@ impl App {
             screen: Screen::Main,
             pending_chord: None,
             should_quit: false,
+            pending_start: None,
         })
     }
 
@@ -524,6 +532,7 @@ mod tests {
             screen: Screen::Main,
             pending_chord: None,
             should_quit: false,
+            pending_start: None,
         }
     }
 

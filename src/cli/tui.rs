@@ -1,5 +1,10 @@
 use anyhow::Result;
 
+use crate::model::fmt_id;
+
 pub fn run() -> Result<()> {
-    crate::tui::run_tui()
+    if let Some(req) = crate::tui::run_tui()? {
+        crate::cli::start::run(fmt_id(req.id), req.tmux)?;
+    }
+    Ok(())
 }

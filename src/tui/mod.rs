@@ -48,7 +48,7 @@ impl Drop for TerminalGuard {
     }
 }
 
-pub fn run_tui() -> Result<()> {
+pub fn run_tui() -> Result<Option<app::StartRequest>> {
     let mut app = App::new()?;
     let mut guard = TerminalGuard::new()?;
 
@@ -65,5 +65,5 @@ pub fn run_tui() -> Result<()> {
             break;
         }
     }
-    Ok(())
+    Ok(app.pending_start)
 }
