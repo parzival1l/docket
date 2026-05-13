@@ -7,6 +7,10 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod model;
+
+use model::{deps_from_db, fmt_id, now, parse_deps, parse_id, Group, Task};
+
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS groups (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -144,76 +148,6 @@ enum GroupCommand {
     },
     /// Mark a group closed
     Close { name: String },
-}
-
-#[derive(Serialize, Clone)]
-struct Task {
-    id: i64,
-    title: String,
-    body: Option<String>,
-    acceptance: Option<String>,
-    deps: Vec<i64>,
-    status: String,
-    priority: i32,
-    group: Option<String>,
-    created_at: String,
-    updated_at: String,
-}
-
-#[derive(Serialize, Clone)]
-struct Group {
-    id: i64,
-    name: String,
-    branch_name: Option<String>,
-    description: Option<String>,
-    state: String,
-    created_at: String,
-}
-
-// === helpers ===
-
-fn now() -> String {
-    Utc::now().to_rfc3339()
-}
-
-fn fmt_id(id: i64) -> String {
-    format!("T-{}", id)
-}
-
-fn parse_id(s: &str) -> Result<i64> {
-    let stripped = s
-        .trim()
-        .trim_start_matches(['T', 't'])
-        .trim_start_matches('-');
-    stripped
-        .parse::<i64>()
-        .with_context(|| format!("invalid task id: {}", s))
-}
-
-fn parse_deps(input: Option<String>) -> Result<Option<String>> {
-    match input {
-        None => Ok(None),
-        Some(s) => {
-            let ids: Result<Vec<i64>> = s
-                .split(|c: char| c == ',' || c.is_whitespace())
-                .filter(|x| !x.is_empty())
-                .map(parse_id)
-                .collect();
-            let ids = ids?;
-            if ids.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(serde_json::to_string(&ids)?))
-            }
-        }
-    }
-}
-
-fn deps_from_db(s: Option<String>) -> Vec<i64> {
-    match s {
-        None => vec![],
-        Some(s) => serde_json::from_str(&s).unwrap_or_default(),
-    }
 }
 
 fn find_repo_root(start: &Path) -> Option<PathBuf> {
@@ -844,70 +778,3 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod model_tests {
-    use super::*;
-
-    #[test]
-    fn fmt_id_formats_with_t_prefix() {
-        assert_eq!(fmt_id(1), "T-1");
-        assert_eq!(fmt_id(42), "T-42");
-    }
-
-    #[test]
-    fn parse_id_accepts_t_prefix_dash() {
-        assert_eq!(parse_id("T-7").unwrap(), 7);
-        assert_eq!(parse_id("t-7").unwrap(), 7);
-    }
-
-    #[test]
-    fn parse_id_accepts_bare_int() {
-        assert_eq!(parse_id("9").unwrap(), 9);
-        assert_eq!(parse_id("  9  ").unwrap(), 9);
-    }
-
-    #[test]
-    fn parse_id_rejects_garbage() {
-        assert!(parse_id("foo").is_err());
-        assert!(parse_id("T-").is_err());
-        assert!(parse_id("").is_err());
-    }
-
-    #[test]
-    fn parse_deps_none_returns_none() {
-        assert_eq!(parse_deps(None).unwrap(), None);
-    }
-
-    #[test]
-    fn parse_deps_empty_string_returns_none() {
-        assert_eq!(parse_deps(Some("".into())).unwrap(), None);
-        assert_eq!(parse_deps(Some("   ".into())).unwrap(), None);
-    }
-
-    #[test]
-    fn parse_deps_comma_separated() {
-        let got = parse_deps(Some("T-3,T-5,9".into())).unwrap();
-        assert_eq!(got.as_deref(), Some("[3,5,9]"));
-    }
-
-    #[test]
-    fn parse_deps_whitespace_separated() {
-        let got = parse_deps(Some("T-3 5 9".into())).unwrap();
-        assert_eq!(got.as_deref(), Some("[3,5,9]"));
-    }
-
-    #[test]
-    fn deps_from_db_none_is_empty() {
-        assert!(deps_from_db(None).is_empty());
-    }
-
-    #[test]
-    fn deps_from_db_parses_json_array() {
-        assert_eq!(deps_from_db(Some("[1,2,3]".into())), vec![1, 2, 3]);
-    }
-
-    #[test]
-    fn deps_from_db_invalid_json_is_empty() {
-        assert_eq!(deps_from_db(Some("not-json".into())), Vec::<i64>::new());
-    }
-}
