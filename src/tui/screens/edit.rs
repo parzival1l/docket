@@ -244,10 +244,10 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2),
-            Constraint::Length(2),
-            Constraint::Length(2),
-            Constraint::Length(2),
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(3),
             Constraint::Length(6),
             Constraint::Length(6),
             Constraint::Length(1),

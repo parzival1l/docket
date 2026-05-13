@@ -1258,6 +1258,31 @@ mod tests {
     }
 
     #[test]
+    fn edit_form_renders_typed_title_text() {
+        // Regression: tui-input rows were 2 tall; the bordered block ate
+        // both rows leaving zero rows for content, so typed text never
+        // appeared on screen even though the Input state was correct.
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('n')));
+        for c in "hello".chars() {
+            app.handle_key(key(KeyCode::Char(c)));
+        }
+        let backend = TestBackend::new(120, 60);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let s: String = buf
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(s.contains("hello"), "expected typed title in rendered buffer");
+    }
+
+    #[test]
     fn edit_form_renders_validation_error() {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
