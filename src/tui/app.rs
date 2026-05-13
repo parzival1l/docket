@@ -296,8 +296,28 @@ impl App {
         self.screen = Screen::Main;
     }
 
-    fn handle_edit(&mut self, _key: KeyEvent) {
-        // Real handler lands in PR-5 Tasks 5–9.
+    fn handle_edit(&mut self, key: KeyEvent) {
+        match (key.code, key.modifiers) {
+            (KeyCode::Tab, _) => {
+                if let Screen::Edit(state) = &mut self.screen {
+                    state.next_field();
+                }
+                return;
+            }
+            (KeyCode::BackTab, _) => {
+                if let Screen::Edit(state) = &mut self.screen {
+                    state.prev_field();
+                }
+                return;
+            }
+            (KeyCode::Esc, _) => {
+                // Dirty path lands in Task 9; today Esc always closes.
+                self.screen = Screen::Main;
+                return;
+            }
+            _ => {}
+        }
+        // Field input forwarding lands in Task 6.
     }
 
     fn handle_filter_prompt(&mut self, key: KeyEvent) {
@@ -847,6 +867,50 @@ mod tests {
         let mut app = mem_app();
         app.handle_key(key(KeyCode::Char('n')));
         assert!(matches!(app.screen, Screen::Edit(_)));
+    }
+
+    #[test]
+    fn tab_advances_to_next_field_in_edit() {
+        use crate::tui::screens::edit::EditField;
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('n')));
+        app.handle_key(key(KeyCode::Tab));
+        if let Screen::Edit(state) = &app.screen {
+            assert_eq!(state.field, EditField::Priority);
+        } else {
+            panic!("expected Edit");
+        }
+    }
+
+    #[test]
+    fn shift_tab_goes_back_one_field() {
+        use crate::tui::screens::edit::EditField;
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('n')));
+        app.handle_key(key(KeyCode::Tab));
+        app.handle_key(key(KeyCode::Tab));
+        app.handle_key(key_with(KeyCode::BackTab, KeyModifiers::SHIFT));
+        if let Screen::Edit(state) = &app.screen {
+            assert_eq!(state.field, EditField::Priority);
+        } else {
+            panic!("expected Edit");
+        }
+    }
+
+    #[test]
+    fn esc_closes_clean_add_form() {
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('n')));
+        app.handle_key(key(KeyCode::Esc));
+        assert_eq!(app.screen, Screen::Main);
+    }
+
+    #[test]
+    fn esc_closes_clean_edit_form() {
+        let mut app = mem_app_with(&[("a", "open", 2)]);
+        app.handle_key(key(KeyCode::Char('e')));
+        app.handle_key(key(KeyCode::Esc));
+        assert_eq!(app.screen, Screen::Main);
     }
 
     #[test]
