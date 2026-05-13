@@ -1166,6 +1166,50 @@ mod tests {
     }
 
     #[test]
+    fn edit_form_renders_with_field_labels() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('n')));
+        let backend = TestBackend::new(120, 60);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let s: String = buf
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(s.contains("new task"));
+        assert!(s.contains("Title"));
+        assert!(s.contains("Priority"));
+        assert!(s.contains("Body"));
+        assert!(s.contains("Acceptance"));
+        assert!(s.contains("Ctrl+S"));
+    }
+
+    #[test]
+    fn edit_form_renders_validation_error() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('n')));
+        app.handle_key(key_with(KeyCode::Char('s'), KeyModifiers::CONTROL));
+        let backend = TestBackend::new(120, 60);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let s: String = buf
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(s.contains("title"));
+    }
+
+    #[test]
     fn discard_confirm_n_returns_to_main_today() {
         let mut app = mem_app();
         app.handle_key(key(KeyCode::Char('n')));

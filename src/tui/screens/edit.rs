@@ -220,8 +220,217 @@ impl EditState {
     }
 }
 
-pub fn render(_frame: &mut ratatui::Frame, _state: &EditState) {
-    // Real renderer lands in Task 10.
+pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
+    use ratatui::layout::{Alignment, Constraint, Direction, Layout};
+    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+
+    let area = centered_rect(80, 30, frame.area());
+    frame.render_widget(Clear, area);
+
+    let title_bar = match state.mode {
+        EditMode::Add => " new task ".to_string(),
+        EditMode::Edit { id } => format!(" edit {} ", crate::model::fmt_id(id)),
+    };
+
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .title(title_bar)
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = outer.inner(area);
+    frame.render_widget(outer, area);
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Length(2),
+            Constraint::Length(2),
+            Constraint::Length(2),
+            Constraint::Length(6),
+            Constraint::Length(6),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    render_input_row(
+        frame,
+        rows[0],
+        "Title",
+        &state.title,
+        state.field == EditField::Title,
+    );
+    render_input_row(
+        frame,
+        rows[1],
+        "Priority",
+        &state.priority,
+        state.field == EditField::Priority,
+    );
+    render_input_row(
+        frame,
+        rows[2],
+        "Group",
+        &state.group,
+        state.field == EditField::Group,
+    );
+    render_input_row(
+        frame,
+        rows[3],
+        "Deps",
+        &state.deps,
+        state.field == EditField::Deps,
+    );
+    render_textarea_row(
+        frame,
+        rows[4],
+        "Body",
+        &state.body,
+        state.field == EditField::Body,
+    );
+    render_textarea_row(
+        frame,
+        rows[5],
+        "Acceptance",
+        &state.acceptance,
+        state.field == EditField::Acceptance,
+    );
+
+    let hint = Paragraph::new(Line::from(vec![
+        Span::styled(
+            "Tab",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" next  ·  "),
+        Span::styled(
+            "Shift+Tab",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" prev  ·  "),
+        Span::styled(
+            "Ctrl+S",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" save  ·  "),
+        Span::styled(
+            "Esc",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" cancel"),
+    ]))
+    .alignment(Alignment::Left);
+    frame.render_widget(hint, rows[6]);
+
+    if let Some(err) = &state.error {
+        let p = Paragraph::new(Span::styled(
+            err.clone(),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ));
+        frame.render_widget(p, rows[7]);
+    }
+}
+
+fn render_input_row(
+    frame: &mut ratatui::Frame,
+    area: ratatui::layout::Rect,
+    label: &str,
+    input: &Input,
+    focused: bool,
+) {
+    use ratatui::layout::{Constraint, Direction, Layout};
+    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::widgets::{Block, Borders, Paragraph};
+
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(12), Constraint::Min(10)])
+        .split(area);
+
+    let lbl_style = if focused {
+        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    };
+    frame.render_widget(Paragraph::new(label.to_string()).style(lbl_style), cols[0]);
+
+    let border_style = if focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default()
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(border_style);
+    let width = cols[1].width.saturating_sub(2) as usize;
+    let scroll = input.visual_scroll(width);
+    let p = Paragraph::new(input.value())
+        .scroll((0, scroll as u16))
+        .block(block);
+    frame.render_widget(p, cols[1]);
+}
+
+fn render_textarea_row(
+    frame: &mut ratatui::Frame,
+    area: ratatui::layout::Rect,
+    label: &str,
+    textarea: &TextArea<'static>,
+    focused: bool,
+) {
+    use ratatui::layout::{Constraint, Direction, Layout};
+    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::widgets::{Block, Borders, Paragraph};
+
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(12), Constraint::Min(10)])
+        .split(area);
+
+    let lbl_style = if focused {
+        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    };
+    frame.render_widget(Paragraph::new(label.to_string()).style(lbl_style), cols[0]);
+
+    let mut ta = textarea.clone();
+    let border_style = if focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default()
+    };
+    ta.set_block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(border_style),
+    );
+    frame.render_widget(&ta, cols[1]);
+}
+
+fn centered_rect(
+    percent_x: u16,
+    height: u16,
+    r: ratatui::layout::Rect,
+) -> ratatui::layout::Rect {
+    use ratatui::layout::{Constraint, Direction, Layout};
+    let v_pad = r.height.saturating_sub(height) / 2;
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(v_pad),
+            Constraint::Length(height),
+            Constraint::Length(v_pad),
+        ])
+        .split(r);
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(vertical[1])[1]
 }
 
 #[cfg(test)]
