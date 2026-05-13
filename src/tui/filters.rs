@@ -13,6 +13,7 @@ pub struct Filters {
 }
 
 impl Filters {
+    #[allow(dead_code)] // used in tests and future top-bar logic
     pub fn is_default(&self) -> bool {
         self.status.is_none()
             && self.group.is_none()

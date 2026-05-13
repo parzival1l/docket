@@ -1,3 +1,7 @@
+pub mod filter_prompt;
+pub mod help;
+pub mod main;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FilterKind {
     Status,

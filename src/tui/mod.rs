@@ -13,6 +13,7 @@ pub mod app;
 pub mod filters;
 pub mod keybindings;
 pub mod screens;
+pub mod widgets;
 
 use app::App;
 
