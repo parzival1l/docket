@@ -185,6 +185,7 @@ pub fn delete_task(conn: &Connection, id: i64) -> Result<usize> {
     Ok(n)
 }
 
+#[allow(dead_code)] // used by TUI (lands in PR-3)
 pub struct TaskUpdate<'a> {
     pub title: &'a str,
     pub body: Option<&'a str>,
@@ -196,6 +197,7 @@ pub struct TaskUpdate<'a> {
 
 /// Updates all editable fields on a task. `status` is intentionally not
 /// touched here — use `set_status` for that.
+#[allow(dead_code)] // used by TUI (lands in PR-3)
 pub fn update_task(conn: &Connection, id: i64, t: TaskUpdate) -> Result<usize> {
     let n = conn.execute(
         "UPDATE tasks SET title = ?1, body = ?2, acceptance = ?3, deps = ?4,

@@ -5,6 +5,7 @@ use crate::model::{fmt_id, Task};
 
 pub mod add;
 pub mod blocked;
+pub mod group;
 pub mod init;
 pub mod ls;
 pub mod prompt;
@@ -162,10 +163,10 @@ pub fn dispatch(cli: Cli) -> Result<()> {
                 name,
                 branch,
                 description,
-            } => crate::cmd_group_new(name, branch, description),
-            GroupCommand::Ls { json } => crate::cmd_group_ls(json),
-            GroupCommand::Show { name, json } => crate::cmd_group_show(name, json),
-            GroupCommand::Close { name } => crate::cmd_group_close(name),
+            } => group::new(name, branch, description),
+            GroupCommand::Ls { json } => group::ls(json),
+            GroupCommand::Show { name, json } => group::show(name, json),
+            GroupCommand::Close { name } => group::close(name),
         },
     }
 }
