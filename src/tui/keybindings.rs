@@ -30,6 +30,8 @@ pub const COMMAND_REGISTRY: &[Binding] = &[
     Binding { keys: "s", label: "cycle status", scope: Scope::List, footer: true },
     Binding { keys: "d", label: "done", scope: Scope::List, footer: true },
     Binding { keys: "x", label: "delete", scope: Scope::List, footer: true },
+    Binding { keys: "S", label: "start", scope: Scope::List, footer: true },
+    Binding { keys: "Ctrl+S", label: "start (tmux)", scope: Scope::List, footer: false },
     Binding { keys: "f s", label: "filter status", scope: Scope::List, footer: false },
     Binding { keys: "f g", label: "filter group", scope: Scope::List, footer: false },
     Binding { keys: "f p", label: "filter priority", scope: Scope::List, footer: false },
@@ -133,6 +135,16 @@ mod tests {
         assert!(COMMAND_REGISTRY
             .iter()
             .any(|b| b.keys == "e" && b.scope == Scope::Detail));
+    }
+
+    #[test]
+    fn registry_contains_start_keys() {
+        assert!(COMMAND_REGISTRY
+            .iter()
+            .any(|b| b.keys == "S" && b.scope == Scope::List));
+        assert!(COMMAND_REGISTRY
+            .iter()
+            .any(|b| b.keys == "Ctrl+S" && b.scope == Scope::List));
     }
 
     #[test]
