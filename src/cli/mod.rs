@@ -11,6 +11,7 @@ pub mod prompt;
 pub mod ready;
 pub mod rm;
 pub mod show;
+pub mod start;
 pub mod status;
 
 pub(crate) fn print_task_row(t: &Task) {
@@ -155,7 +156,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         Command::Done { id } => status::done(id),
         Command::Rm { id } => rm::run(id),
         Command::Prompt { name } => prompt::run(name),
-        Command::Start { id, tmux } => crate::cmd_start(id, tmux),
+        Command::Start { id, tmux } => start::run(id, tmux),
         Command::Group { action } => match action {
             GroupCommand::New {
                 name,
