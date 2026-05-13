@@ -1,7 +1,7 @@
 use crate::db::{load_all_tasks, open_db};
 use crate::model::Task;
 use crate::tui::filters::{filtered_indices, Filters};
-use crate::tui::screens::edit::EditState;
+use crate::tui::screens::edit::{EditMode, EditState};
 use crate::tui::screens::{FilterKind, PendingAction, Screen};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -254,6 +254,71 @@ impl App {
         }
     }
 
+    fn save_edit(&mut self) {
+        let Screen::Edit(state) = &mut self.screen else {
+            return;
+        };
+        let validated = match state.validate() {
+            Ok(v) => v,
+            Err(msg) => {
+                state.error = Some(msg);
+                return;
+            }
+        };
+        let mode = state.mode;
+
+        let group_id = match validated.group.as_deref() {
+            None => None,
+            Some(name) => match crate::db::get_or_create_group(&self.conn, name) {
+                Ok(id) => Some(id),
+                Err(e) => {
+                    state.error = Some(format!("group: {}", e));
+                    return;
+                }
+            },
+        };
+
+        let result = match mode {
+            EditMode::Add => crate::db::insert_task(
+                &self.conn,
+                crate::db::NewTask {
+                    title: &validated.title,
+                    body: validated.body.as_deref(),
+                    acceptance: validated.acceptance.as_deref(),
+                    deps_json: validated.deps_json.as_deref(),
+                    priority: validated.priority,
+                    group_id,
+                },
+            ),
+            EditMode::Edit { id } => crate::db::update_task(
+                &self.conn,
+                id,
+                crate::db::TaskUpdate {
+                    title: &validated.title,
+                    body: validated.body.as_deref(),
+                    acceptance: validated.acceptance.as_deref(),
+                    deps_json: validated.deps_json.as_deref(),
+                    priority: validated.priority,
+                    group_id,
+                },
+            )
+            .map(|_| id),
+        };
+
+        match result {
+            Ok(id) => {
+                let _ = self.reload();
+                self.preserve_cursor_on(id);
+                self.screen = Screen::Main;
+            }
+            Err(e) => {
+                if let Screen::Edit(state) = &mut self.screen {
+                    state.error = Some(format!("db: {}", e));
+                }
+            }
+        }
+    }
+
     fn handle_help(&mut self, key: KeyEvent) {
         if matches!(
             key.code,
@@ -298,6 +363,10 @@ impl App {
 
     fn handle_edit(&mut self, key: KeyEvent) {
         match (key.code, key.modifiers) {
+            (KeyCode::Char('s'), m) if m.contains(KeyModifiers::CONTROL) => {
+                self.save_edit();
+                return;
+            }
             (KeyCode::Tab, _) => {
                 if let Screen::Edit(state) = &mut self.screen {
                     state.next_field();
@@ -1013,6 +1082,91 @@ mod tests {
         } else {
             panic!();
         }
+    }
+
+    #[test]
+    fn ctrl_s_save_creates_new_task_in_add_mode() {
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('n')));
+        for c in "from form".chars() {
+            app.handle_key(key(KeyCode::Char(c)));
+        }
+        app.handle_key(key_with(KeyCode::Char('s'), KeyModifiers::CONTROL));
+        assert_eq!(app.screen, Screen::Main);
+        assert_eq!(app.tasks.len(), 1);
+        assert_eq!(app.tasks[0].title, "from form");
+        assert_eq!(app.tasks[0].priority, 2);
+    }
+
+    #[test]
+    fn ctrl_s_save_updates_existing_task_in_edit_mode() {
+        let mut app = mem_app_with(&[("orig", "open", 2)]);
+        app.handle_key(key(KeyCode::Char('e')));
+        for _ in 0.."orig".len() {
+            app.handle_key(key(KeyCode::Backspace));
+        }
+        for c in "renamed".chars() {
+            app.handle_key(key(KeyCode::Char(c)));
+        }
+        app.handle_key(key_with(KeyCode::Char('s'), KeyModifiers::CONTROL));
+        assert_eq!(app.screen, Screen::Main);
+        assert_eq!(app.tasks.len(), 1);
+        assert_eq!(app.tasks[0].title, "renamed");
+    }
+
+    #[test]
+    fn ctrl_s_save_with_invalid_title_keeps_form_open_with_error() {
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('n')));
+        app.handle_key(key_with(KeyCode::Char('s'), KeyModifiers::CONTROL));
+        match &app.screen {
+            Screen::Edit(state) => {
+                assert!(state.error.as_deref().unwrap().contains("title"));
+            }
+            _ => panic!("expected Edit"),
+        }
+    }
+
+    #[test]
+    fn ctrl_s_save_priority_out_of_range_keeps_form_open() {
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('n')));
+        for c in "ok".chars() {
+            app.handle_key(key(KeyCode::Char(c)));
+        }
+        app.handle_key(key(KeyCode::Tab));
+        app.handle_key(key(KeyCode::Char('9')));
+        app.handle_key(key_with(KeyCode::Char('s'), KeyModifiers::CONTROL));
+        assert!(matches!(app.screen, Screen::Edit(_)));
+        assert_eq!(app.tasks.len(), 0);
+    }
+
+    #[test]
+    fn ctrl_s_save_in_add_mode_creates_with_group_and_deps() {
+        let mut app = mem_app_with(&[("dep", "open", 2)]);
+        let dep_id = app.selected_task().unwrap().id;
+        app.handle_key(key(KeyCode::Char('n')));
+        for c in "child".chars() {
+            app.handle_key(key(KeyCode::Char(c)));
+        }
+        app.handle_key(key(KeyCode::Tab));
+        app.handle_key(key(KeyCode::Tab));
+        for c in "v0.2".chars() {
+            app.handle_key(key(KeyCode::Char(c)));
+        }
+        app.handle_key(key(KeyCode::Tab));
+        for c in format!("T-{}", dep_id).chars() {
+            app.handle_key(key(KeyCode::Char(c)));
+        }
+        app.handle_key(key_with(KeyCode::Char('s'), KeyModifiers::CONTROL));
+        assert_eq!(app.screen, Screen::Main);
+        let child = app
+            .tasks
+            .iter()
+            .find(|t| t.title == "child")
+            .expect("child created");
+        assert_eq!(child.group.as_deref(), Some("v0.2"));
+        assert_eq!(child.deps, vec![dep_id]);
     }
 
     #[test]
