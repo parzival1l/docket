@@ -8,6 +8,7 @@ pub mod blocked;
 pub mod init;
 pub mod ls;
 pub mod ready;
+pub mod rm;
 pub mod show;
 pub mod status;
 
@@ -151,7 +152,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         Command::Blocked { group, json } => blocked::run(group, json),
         Command::Status { id, state } => status::run(id, state),
         Command::Done { id } => status::done(id),
-        Command::Rm { id } => crate::cmd_rm(id),
+        Command::Rm { id } => rm::run(id),
         Command::Prompt { name } => crate::cmd_prompt(name),
         Command::Start { id, tmux } => crate::cmd_start(id, tmux),
         Command::Group { action } => match action {

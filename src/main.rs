@@ -18,17 +18,6 @@ use prompts::{assemble_prompt, PROMPT_COMMIT, PROMPT_CREATE_TASK, PROMPT_PR, PRO
 
 // === commands ===
 
-pub(crate) fn cmd_rm(id: String) -> Result<()> {
-    let id = parse_id(&id)?;
-    let conn = open_db()?;
-    let n = db::delete_task(&conn, id)?;
-    if n == 0 {
-        return Err(anyhow!("{} not found", fmt_id(id)));
-    }
-    println!("{} deleted", fmt_id(id));
-    Ok(())
-}
-
 pub(crate) fn cmd_prompt(name: String) -> Result<()> {
     let body = match name.as_str() {
         "tdd-pursuit" | "tdd" => PROMPT_TDD,
