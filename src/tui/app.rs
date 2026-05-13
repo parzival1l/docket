@@ -1,7 +1,8 @@
 use crate::db::{load_all_tasks, open_db};
 use crate::model::Task;
 use crate::tui::filters::{filtered_indices, Filters};
-use crate::tui::screens::{FilterKind, Screen};
+#[allow(unused_imports)] // PendingAction is referenced starting in Task 6
+use crate::tui::screens::{FilterKind, PendingAction, Screen};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
@@ -60,6 +61,7 @@ impl App {
             Screen::Main => self.handle_main(key),
             Screen::Help => self.handle_help(key),
             Screen::FilterPrompt { .. } => self.handle_filter_prompt(key),
+            Screen::Confirm(_) => self.handle_confirm(key),
         }
     }
 
@@ -187,6 +189,10 @@ impl App {
         }
     }
 
+    fn handle_confirm(&mut self, _key: KeyEvent) {
+        // Real handler lands in Task 7.
+    }
+
     fn handle_filter_prompt(&mut self, key: KeyEvent) {
         let Screen::FilterPrompt { kind, input } = &mut self.screen else {
             return;
@@ -246,6 +252,7 @@ impl App {
             Screen::FilterPrompt { kind, input } => {
                 crate::tui::screens::filter_prompt::render(frame, kind, input)
             }
+            Screen::Confirm(action) => crate::tui::screens::confirm::render(frame, action),
             Screen::Main => {}
         }
     }

@@ -11,13 +11,20 @@ pub fn render(frame: &mut Frame) {
     frame.render_widget(Clear, area);
 
     let mut lines: Vec<Line> = Vec::new();
-    for scope in [Scope::Global, Scope::List, Scope::Detail, Scope::FilterPrompt] {
+    for scope in [
+        Scope::Global,
+        Scope::List,
+        Scope::Detail,
+        Scope::FilterPrompt,
+        Scope::Confirm,
+    ] {
         let scope_label = match scope {
             Scope::Global => "Global",
             Scope::List => "List",
             Scope::Detail => "Detail",
             Scope::Help => "Help",
             Scope::FilterPrompt => "Filter prompt",
+            Scope::Confirm => "Confirm",
         };
         lines.push(Line::from(Span::styled(
             scope_label.to_string(),

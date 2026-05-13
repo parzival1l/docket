@@ -5,6 +5,7 @@ pub enum Scope {
     Detail,
     Help,
     FilterPrompt,
+    Confirm,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -23,6 +24,9 @@ pub const COMMAND_REGISTRY: &[Binding] = &[
     Binding { keys: "j/k", label: "nav", scope: Scope::List, footer: true },
     Binding { keys: "g/G", label: "top/bottom", scope: Scope::List, footer: false },
     Binding { keys: "l", label: "detail", scope: Scope::List, footer: true },
+    Binding { keys: "s", label: "cycle status", scope: Scope::List, footer: true },
+    Binding { keys: "d", label: "done", scope: Scope::List, footer: true },
+    Binding { keys: "x", label: "delete", scope: Scope::List, footer: true },
     Binding { keys: "f s", label: "filter status", scope: Scope::List, footer: false },
     Binding { keys: "f g", label: "filter group", scope: Scope::List, footer: false },
     Binding { keys: "f p", label: "filter priority", scope: Scope::List, footer: false },
@@ -34,6 +38,8 @@ pub const COMMAND_REGISTRY: &[Binding] = &[
     Binding { keys: "?/Esc", label: "close help", scope: Scope::Help, footer: true },
     Binding { keys: "Enter", label: "apply", scope: Scope::FilterPrompt, footer: true },
     Binding { keys: "Esc", label: "cancel", scope: Scope::FilterPrompt, footer: true },
+    Binding { keys: "y/Enter", label: "confirm", scope: Scope::Confirm, footer: true },
+    Binding { keys: "n/Esc", label: "cancel", scope: Scope::Confirm, footer: true },
 ];
 
 pub fn footer_for(scope: Scope) -> Vec<Binding> {
@@ -55,6 +61,19 @@ mod tests {
     }
 
     #[test]
+    fn registry_contains_mutation_keys() {
+        assert!(COMMAND_REGISTRY
+            .iter()
+            .any(|b| b.keys == "s" && b.scope == Scope::List));
+        assert!(COMMAND_REGISTRY
+            .iter()
+            .any(|b| b.keys == "d" && b.scope == Scope::List));
+        assert!(COMMAND_REGISTRY
+            .iter()
+            .any(|b| b.keys == "x" && b.scope == Scope::List));
+    }
+
+    #[test]
     fn footer_for_list_includes_globals_and_list_keys() {
         let fb = footer_for(Scope::List);
         let labels: Vec<&str> = fb.iter().map(|b| b.label).collect();
@@ -63,6 +82,9 @@ mod tests {
         assert!(labels.contains(&"nav"));
         assert!(labels.contains(&"detail"));
         assert!(labels.contains(&"clear filters"));
+        assert!(labels.contains(&"cycle status"));
+        assert!(labels.contains(&"done"));
+        assert!(labels.contains(&"delete"));
     }
 
     #[test]
@@ -79,6 +101,14 @@ mod tests {
         let fb = footer_for(Scope::FilterPrompt);
         let labels: Vec<&str> = fb.iter().map(|b| b.label).collect();
         assert!(labels.contains(&"apply"));
+        assert!(labels.contains(&"cancel"));
+    }
+
+    #[test]
+    fn footer_for_confirm_includes_confirm_and_cancel() {
+        let fb = footer_for(Scope::Confirm);
+        let labels: Vec<&str> = fb.iter().map(|b| b.label).collect();
+        assert!(labels.contains(&"confirm"));
         assert!(labels.contains(&"cancel"));
     }
 }
