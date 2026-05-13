@@ -156,6 +156,12 @@ impl App {
                 let _ = self.reload();
                 return;
             }
+            (KeyCode::Char('s'), m) if m.contains(KeyModifiers::CONTROL) => {
+                if self.focus == Pane::List {
+                    self.request_start(true);
+                }
+                return;
+            }
             _ => {}
         }
 
@@ -1203,6 +1209,26 @@ mod tests {
     fn capital_s_on_empty_list_is_a_noop() {
         let mut app = mem_app();
         app.handle_key(key_with(KeyCode::Char('S'), KeyModifiers::SHIFT));
+        assert!(!app.should_quit);
+        assert!(app.pending_start.is_none());
+    }
+
+    #[test]
+    fn ctrl_s_in_list_sets_pending_start_with_tmux_and_quits() {
+        let mut app = mem_app_with(&[("a", "open", 2)]);
+        let id = app.selected_task().unwrap().id;
+        app.handle_key(key_with(KeyCode::Char('s'), KeyModifiers::CONTROL));
+        assert!(app.should_quit);
+        assert_eq!(
+            app.pending_start,
+            Some(StartRequest { id, tmux: true })
+        );
+    }
+
+    #[test]
+    fn ctrl_s_in_list_on_empty_is_a_noop() {
+        let mut app = mem_app();
+        app.handle_key(key_with(KeyCode::Char('s'), KeyModifiers::CONTROL));
         assert!(!app.should_quit);
         assert!(app.pending_start.is_none());
     }
