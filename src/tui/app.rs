@@ -182,6 +182,9 @@ impl App {
             KeyCode::Char('s') => {
                 self.cycle_status();
             }
+            KeyCode::Char('d') => {
+                self.mark_done();
+            }
             _ => {}
         }
     }
@@ -193,6 +196,17 @@ impl App {
         let id = task.id;
         let next = next_status(&task.status);
         if crate::db::set_status(&self.conn, id, next).is_ok() {
+            let _ = self.reload();
+            self.preserve_cursor_on(id);
+        }
+    }
+
+    fn mark_done(&mut self) {
+        let Some(task) = self.selected_task() else {
+            return;
+        };
+        let id = task.id;
+        if crate::db::set_status(&self.conn, id, "done").is_ok() {
             let _ = self.reload();
             self.preserve_cursor_on(id);
         }
@@ -588,6 +602,34 @@ mod tests {
     fn s_on_empty_list_is_a_noop() {
         let mut app = mem_app();
         app.handle_key(key(KeyCode::Char('s')));
+        assert!(app.selected_task().is_none());
+    }
+
+    #[test]
+    fn d_marks_open_task_done() {
+        let mut app = mem_app_with(&[("a", "open", 2)]);
+        app.handle_key(key(KeyCode::Char('d')));
+        assert_eq!(app.selected_task().unwrap().status, "done");
+    }
+
+    #[test]
+    fn d_marks_in_progress_task_done() {
+        let mut app = mem_app_with(&[("a", "in_progress", 2)]);
+        app.handle_key(key(KeyCode::Char('d')));
+        assert_eq!(app.selected_task().unwrap().status, "done");
+    }
+
+    #[test]
+    fn d_on_already_done_task_stays_done() {
+        let mut app = mem_app_with(&[("a", "done", 2)]);
+        app.handle_key(key(KeyCode::Char('d')));
+        assert_eq!(app.selected_task().unwrap().status, "done");
+    }
+
+    #[test]
+    fn d_on_empty_list_is_a_noop() {
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('d')));
         assert!(app.selected_task().is_none());
     }
 
