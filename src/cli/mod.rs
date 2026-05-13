@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+pub mod add;
 pub mod init;
 
 #[derive(Parser)]
@@ -120,7 +121,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             deps,
             priority,
             group,
-        } => crate::cmd_add(title, body, acceptance, deps, priority, group),
+        } => add::run(title, body, acceptance, deps, priority, group),
         Command::Ls { status, group, json } => crate::cmd_ls(status, group, json),
         Command::Show { id, json } => crate::cmd_show(id, json),
         Command::Ready { group, json } => crate::cmd_ready(group, json),
