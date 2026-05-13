@@ -8,8 +8,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 mod model;
+mod prompts;
 
 use model::{deps_from_db, fmt_id, now, parse_deps, parse_id, Group, Task};
+use prompts::{assemble_prompt, PROMPT_COMMIT, PROMPT_CREATE_TASK, PROMPT_PR, PROMPT_TDD};
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS groups (
@@ -37,11 +39,6 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_group  ON tasks(group_id);
 "#;
-
-const PROMPT_TDD: &str = include_str!("../templates/tdd-pursuit.md");
-const PROMPT_CREATE_TASK: &str = include_str!("../templates/create-task.md");
-const PROMPT_COMMIT: &str = include_str!("../templates/commit.md");
-const PROMPT_PR: &str = include_str!("../templates/pr.md");
 
 #[derive(Parser)]
 #[command(name = "docket", version, about = "Agent-shaped task tracker with TDD execution harness")]
@@ -499,19 +496,6 @@ fn cmd_prompt(name: String) -> Result<()> {
     };
     print!("{}", body);
     Ok(())
-}
-
-fn assemble_prompt(t: &Task) -> String {
-    let body = t.body.as_deref().unwrap_or("(no body)");
-    let acceptance = t.acceptance.as_deref().unwrap_or("(no acceptance criteria)");
-    format!(
-        "# Task {}: {}\n\n## Body\n{}\n\n## Acceptance\n{}\n\n{}",
-        fmt_id(t.id),
-        t.title,
-        body,
-        acceptance,
-        PROMPT_TDD
-    )
 }
 
 fn mark_in_progress(conn: &Connection, id: i64) -> Result<()> {
