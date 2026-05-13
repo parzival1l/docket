@@ -10,6 +10,7 @@ use std::io::{self, Stdout};
 use std::time::Duration;
 
 pub mod app;
+pub mod filters;
 
 use app::App;
 
