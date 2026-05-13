@@ -45,8 +45,8 @@ impl Drop for TerminalGuard {
 }
 
 pub fn run_tui() -> Result<()> {
+    let mut app = App::new()?;
     let mut guard = TerminalGuard::new()?;
-    let mut app = App::default();
 
     loop {
         guard.terminal().draw(|f| app.render(f))?;
