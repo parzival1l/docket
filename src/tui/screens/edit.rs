@@ -151,6 +151,75 @@ impl EditState {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidatedForm {
+    pub title: String,
+    pub body: Option<String>,
+    pub acceptance: Option<String>,
+    pub deps_json: Option<String>,
+    pub priority: i32,
+    pub group: Option<String>,
+}
+
+impl EditState {
+    /// Pure: reads field text only. Returns the validated form or a single
+    /// error message suitable for the modal's status line.
+    pub fn validate(&self) -> Result<ValidatedForm, String> {
+        let title = self.title.value().trim();
+        if title.is_empty() {
+            return Err("title is required".into());
+        }
+
+        let priority_raw = self.priority.value().trim();
+        let priority = if priority_raw.is_empty() {
+            2
+        } else {
+            match priority_raw.parse::<i32>() {
+                Ok(p) if (0..=4).contains(&p) => p,
+                Ok(_) => return Err("priority must be between 0 and 4".into()),
+                Err(_) => return Err("priority must be an integer 0..=4".into()),
+            }
+        };
+
+        let group_raw = self.group.value().trim();
+        let group = if group_raw.is_empty() {
+            None
+        } else {
+            Some(group_raw.to_string())
+        };
+
+        let deps_raw = self.deps.value().trim();
+        let deps_json = if deps_raw.is_empty() {
+            None
+        } else {
+            crate::model::parse_deps(Some(deps_raw.to_string()))
+                .map_err(|e| format!("deps: {}", e))?
+        };
+
+        let body_joined = self.body.lines().join("\n");
+        let acceptance_joined = self.acceptance.lines().join("\n");
+        let body = if body_joined.trim().is_empty() {
+            None
+        } else {
+            Some(body_joined)
+        };
+        let acceptance = if acceptance_joined.trim().is_empty() {
+            None
+        } else {
+            Some(acceptance_joined)
+        };
+
+        Ok(ValidatedForm {
+            title: title.to_string(),
+            body,
+            acceptance,
+            deps_json,
+            priority,
+            group,
+        })
+    }
+}
+
 pub fn render(_frame: &mut ratatui::Frame, _state: &EditState) {
     // Real renderer lands in Task 10.
 }
@@ -214,5 +283,83 @@ mod tests {
         let mut s = EditState::for_add();
         s.title = Input::default().with_value("changed".into());
         assert!(s.is_dirty());
+    }
+
+    #[test]
+    fn validate_rejects_empty_title() {
+        let s = EditState::for_add();
+        let err = s.validate().unwrap_err();
+        assert!(err.contains("title"));
+    }
+
+    #[test]
+    fn validate_defaults_priority_to_two_when_blank() {
+        let mut s = EditState::for_add();
+        s.title = Input::default().with_value("ok".into());
+        assert_eq!(s.validate().unwrap().priority, 2);
+    }
+
+    #[test]
+    fn validate_accepts_priority_zero_through_four() {
+        for p in 0..=4 {
+            let mut s = EditState::for_add();
+            s.title = Input::default().with_value("ok".into());
+            s.priority = Input::default().with_value(p.to_string());
+            assert_eq!(s.validate().unwrap().priority, p);
+        }
+    }
+
+    #[test]
+    fn validate_rejects_priority_out_of_range() {
+        let mut s = EditState::for_add();
+        s.title = Input::default().with_value("ok".into());
+        s.priority = Input::default().with_value("5".into());
+        assert!(s.validate().unwrap_err().contains("0 and 4"));
+    }
+
+    #[test]
+    fn validate_rejects_non_numeric_priority() {
+        let mut s = EditState::for_add();
+        s.title = Input::default().with_value("ok".into());
+        s.priority = Input::default().with_value("foo".into());
+        assert!(s.validate().unwrap_err().contains("integer"));
+    }
+
+    #[test]
+    fn validate_empty_group_yields_none() {
+        let mut s = EditState::for_add();
+        s.title = Input::default().with_value("ok".into());
+        assert!(s.validate().unwrap().group.is_none());
+    }
+
+    #[test]
+    fn validate_non_empty_group_yields_some() {
+        let mut s = EditState::for_add();
+        s.title = Input::default().with_value("ok".into());
+        s.group = Input::default().with_value("v0.1".into());
+        assert_eq!(s.validate().unwrap().group.as_deref(), Some("v0.1"));
+    }
+
+    #[test]
+    fn validate_parses_deps_into_json() {
+        let mut s = EditState::for_add();
+        s.title = Input::default().with_value("ok".into());
+        s.deps = Input::default().with_value("T-3, 7".into());
+        assert_eq!(s.validate().unwrap().deps_json.as_deref(), Some("[3,7]"));
+    }
+
+    #[test]
+    fn validate_rejects_invalid_deps() {
+        let mut s = EditState::for_add();
+        s.title = Input::default().with_value("ok".into());
+        s.deps = Input::default().with_value("not-a-task".into());
+        assert!(s.validate().unwrap_err().contains("deps"));
+    }
+
+    #[test]
+    fn validate_empty_body_yields_none() {
+        let mut s = EditState::for_add();
+        s.title = Input::default().with_value("ok".into());
+        assert!(s.validate().unwrap().body.is_none());
     }
 }
