@@ -14,6 +14,15 @@ pub enum Pane {
     Detail,
 }
 
+fn next_status(current: &str) -> &'static str {
+    match current {
+        "open" => "in_progress",
+        "in_progress" => "done",
+        "done" => "open",
+        _ => "open",
+    }
+}
+
 pub struct App {
     pub conn: Connection,
     pub tasks: Vec<Task>,
@@ -170,7 +179,22 @@ impl App {
             KeyCode::Char('f') => {
                 self.pending_chord = Some('f');
             }
+            KeyCode::Char('s') => {
+                self.cycle_status();
+            }
             _ => {}
+        }
+    }
+
+    fn cycle_status(&mut self) {
+        let Some(task) = self.selected_task() else {
+            return;
+        };
+        let id = task.id;
+        let next = next_status(&task.status);
+        if crate::db::set_status(&self.conn, id, next).is_ok() {
+            let _ = self.reload();
+            self.preserve_cursor_on(id);
         }
     }
 
@@ -242,6 +266,20 @@ impl App {
             self.cursor = 0;
         } else if self.cursor >= visible_len {
             self.cursor = visible_len - 1;
+        }
+    }
+
+    /// Set cursor to the visible position of `id` (if still visible),
+    /// else clamp to the new visible length.
+    fn preserve_cursor_on(&mut self, id: i64) {
+        let visible = self.visible_indices();
+        if let Some(pos) = visible
+            .iter()
+            .position(|i| self.tasks.get(*i).map(|t| t.id) == Some(id))
+        {
+            self.cursor = pos;
+        } else {
+            self.clamp_cursor();
         }
     }
 
@@ -501,6 +539,55 @@ mod tests {
     #[test]
     fn selected_task_none_when_no_tasks() {
         let app = mem_app();
+        assert!(app.selected_task().is_none());
+    }
+
+    #[test]
+    fn s_cycles_open_to_in_progress() {
+        let mut app = mem_app_with(&[("a", "open", 2)]);
+        app.handle_key(key(KeyCode::Char('s')));
+        assert_eq!(app.selected_task().unwrap().status, "in_progress");
+    }
+
+    #[test]
+    fn s_cycles_in_progress_to_done() {
+        let mut app = mem_app_with(&[("a", "in_progress", 2)]);
+        app.handle_key(key(KeyCode::Char('s')));
+        assert_eq!(app.selected_task().unwrap().status, "done");
+    }
+
+    #[test]
+    fn s_cycles_done_back_to_open() {
+        let mut app = mem_app_with(&[("a", "done", 2)]);
+        app.handle_key(key(KeyCode::Char('s')));
+        assert_eq!(app.selected_task().unwrap().status, "open");
+    }
+
+    #[test]
+    fn s_cycles_custom_status_to_open() {
+        let mut app = mem_app_with(&[("a", "wontfix", 2)]);
+        app.handle_key(key(KeyCode::Char('s')));
+        assert_eq!(app.selected_task().unwrap().status, "open");
+    }
+
+    #[test]
+    fn s_keeps_cursor_on_same_task_id_after_status_change() {
+        let mut app = mem_app_with(&[
+            ("first", "open", 2),
+            ("second", "open", 2),
+            ("third", "open", 2),
+        ]);
+        app.handle_key(key(KeyCode::Char('j')));
+        let id_before = app.selected_task().unwrap().id;
+        app.handle_key(key(KeyCode::Char('s')));
+        assert_eq!(app.selected_task().unwrap().id, id_before);
+        assert_eq!(app.selected_task().unwrap().status, "in_progress");
+    }
+
+    #[test]
+    fn s_on_empty_list_is_a_noop() {
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('s')));
         assert!(app.selected_task().is_none());
     }
 
