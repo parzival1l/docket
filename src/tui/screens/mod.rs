@@ -1,0 +1,20 @@
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FilterKind {
+    Status,
+    Group,
+    Priority,
+    Text,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Screen {
+    Main,
+    Help,
+    FilterPrompt { kind: FilterKind, input: String },
+}
+
+impl Default for Screen {
+    fn default() -> Self {
+        Screen::Main
+    }
+}
