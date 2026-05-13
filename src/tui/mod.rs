@@ -11,6 +11,7 @@ use std::time::Duration;
 
 pub mod app;
 pub mod filters;
+pub mod keybindings;
 
 use app::App;
 
