@@ -13,6 +13,10 @@ pub fn render(frame: &mut Frame, action: &PendingAction) {
             " delete task ".to_string(),
             format!("Delete {} \"{}\"?", fmt_id(*id), title),
         ),
+        PendingAction::DiscardEdits => (
+            " discard edits ".to_string(),
+            "Discard unsaved changes?".to_string(),
+        ),
     };
 
     let area = centered_rect(60, frame.area());

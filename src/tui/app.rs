@@ -70,6 +70,7 @@ impl App {
             Screen::Help => self.handle_help(key),
             Screen::FilterPrompt { .. } => self.handle_filter_prompt(key),
             Screen::Confirm(_) => self.handle_confirm(key),
+            Screen::Edit(_) => self.handle_edit(key),
         }
     }
 
@@ -261,10 +262,19 @@ impl App {
                         let _ = self.reload();
                     }
                 }
+                PendingAction::DiscardEdits => {
+                    // The Edit form already transitioned out of Screen::Edit
+                    // when we opened the discard confirm; there's nothing to
+                    // persist. Fall through to set Screen::Main.
+                }
             }
         }
 
         self.screen = Screen::Main;
+    }
+
+    fn handle_edit(&mut self, _key: KeyEvent) {
+        // Real handler lands in PR-5 Tasks 5–9.
     }
 
     fn handle_filter_prompt(&mut self, key: KeyEvent) {
@@ -334,14 +344,21 @@ impl App {
     }
 
     pub fn render(&self, frame: &mut Frame) {
-        crate::tui::screens::main::render(self, frame);
         match &self.screen {
-            Screen::Help => crate::tui::screens::help::render(frame),
-            Screen::FilterPrompt { kind, input } => {
-                crate::tui::screens::filter_prompt::render(frame, kind, input)
+            Screen::Edit(state) => crate::tui::screens::edit::render(frame, state),
+            _ => {
+                crate::tui::screens::main::render(self, frame);
+                match &self.screen {
+                    Screen::Help => crate::tui::screens::help::render(frame),
+                    Screen::FilterPrompt { kind, input } => {
+                        crate::tui::screens::filter_prompt::render(frame, kind, input)
+                    }
+                    Screen::Confirm(action) => {
+                        crate::tui::screens::confirm::render(frame, action)
+                    }
+                    Screen::Main | Screen::Edit(_) => {}
+                }
             }
-            Screen::Confirm(action) => crate::tui::screens::confirm::render(frame, action),
-            Screen::Main => {}
         }
     }
 }
