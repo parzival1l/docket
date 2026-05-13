@@ -317,7 +317,33 @@ impl App {
             }
             _ => {}
         }
-        // Field input forwarding lands in Task 6.
+
+        let Screen::Edit(state) = &mut self.screen else {
+            return;
+        };
+        let event = crossterm::event::Event::Key(key);
+        use crate::tui::screens::edit::EditField;
+        use tui_input::backend::crossterm::EventHandler;
+        match state.field {
+            EditField::Title => {
+                let _ = state.title.handle_event(&event);
+            }
+            EditField::Priority => {
+                let _ = state.priority.handle_event(&event);
+            }
+            EditField::Group => {
+                let _ = state.group.handle_event(&event);
+            }
+            EditField::Deps => {
+                let _ = state.deps.handle_event(&event);
+            }
+            EditField::Body => {
+                state.body.input(event);
+            }
+            EditField::Acceptance => {
+                state.acceptance.input(event);
+            }
+        }
     }
 
     fn handle_filter_prompt(&mut self, key: KeyEvent) {
@@ -911,6 +937,82 @@ mod tests {
         app.handle_key(key(KeyCode::Char('e')));
         app.handle_key(key(KeyCode::Esc));
         assert_eq!(app.screen, Screen::Main);
+    }
+
+    #[test]
+    fn typing_into_title_appends_chars() {
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('n')));
+        for c in "buy milk".chars() {
+            app.handle_key(key(KeyCode::Char(c)));
+        }
+        if let Screen::Edit(state) = &app.screen {
+            assert_eq!(state.title.value(), "buy milk");
+        } else {
+            panic!();
+        }
+    }
+
+    #[test]
+    fn typing_into_priority_field_works() {
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('n')));
+        app.handle_key(key(KeyCode::Tab));
+        app.handle_key(key(KeyCode::Char('3')));
+        if let Screen::Edit(state) = &app.screen {
+            assert_eq!(state.priority.value(), "3");
+        } else {
+            panic!();
+        }
+    }
+
+    #[test]
+    fn typing_into_body_textarea_inserts_text() {
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('n')));
+        for _ in 0..4 {
+            app.handle_key(key(KeyCode::Tab));
+        }
+        for c in "hi".chars() {
+            app.handle_key(key(KeyCode::Char(c)));
+        }
+        if let Screen::Edit(state) = &app.screen {
+            assert_eq!(state.body.lines().join("\n"), "hi");
+        } else {
+            panic!();
+        }
+    }
+
+    #[test]
+    fn enter_in_body_textarea_inserts_newline() {
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('n')));
+        for _ in 0..4 {
+            app.handle_key(key(KeyCode::Tab));
+        }
+        app.handle_key(key(KeyCode::Char('a')));
+        app.handle_key(key(KeyCode::Enter));
+        app.handle_key(key(KeyCode::Char('b')));
+        if let Screen::Edit(state) = &app.screen {
+            assert_eq!(state.body.lines(), &["a", "b"]);
+        } else {
+            panic!();
+        }
+    }
+
+    #[test]
+    fn backspace_in_title_deletes_char() {
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('n')));
+        for c in "abc".chars() {
+            app.handle_key(key(KeyCode::Char(c)));
+        }
+        app.handle_key(key(KeyCode::Backspace));
+        if let Screen::Edit(state) = &app.screen {
+            assert_eq!(state.title.value(), "ab");
+        } else {
+            panic!();
+        }
     }
 
     #[test]
