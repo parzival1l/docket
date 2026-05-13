@@ -1,8 +1,27 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+use crate::model::{fmt_id, Task};
+
 pub mod add;
 pub mod init;
+pub mod ls;
+
+pub(crate) fn print_task_row(t: &Task) {
+    let group_str = t
+        .group
+        .as_deref()
+        .map(|g| format!(" [{}]", g))
+        .unwrap_or_default();
+    println!(
+        "{:<6} {:<12} p{} {}{}",
+        fmt_id(t.id),
+        t.status,
+        t.priority,
+        t.title,
+        group_str
+    );
+}
 
 #[derive(Parser)]
 #[command(name = "docket", version, about = "Agent-shaped task tracker with TDD execution harness")]
@@ -122,7 +141,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             priority,
             group,
         } => add::run(title, body, acceptance, deps, priority, group),
-        Command::Ls { status, group, json } => crate::cmd_ls(status, group, json),
+        Command::Ls { status, group, json } => ls::run(status, group, json),
         Command::Show { id, json } => crate::cmd_show(id, json),
         Command::Ready { group, json } => crate::cmd_ready(group, json),
         Command::Blocked { group, json } => crate::cmd_blocked(group, json),

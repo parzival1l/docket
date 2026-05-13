@@ -11,47 +11,12 @@ mod db;
 mod model;
 mod prompts;
 
+use cli::print_task_row;
 use db::{get_or_create_group, load_all_groups, load_all_tasks, load_group_by_name, open_db};
 use model::{fmt_id, now, parse_deps, parse_id, Group, Task};
 use prompts::{assemble_prompt, PROMPT_COMMIT, PROMPT_CREATE_TASK, PROMPT_PR, PROMPT_TDD};
 
-fn print_task_row(t: &Task) {
-    let group_str = t
-        .group
-        .as_deref()
-        .map(|g| format!(" [{}]", g))
-        .unwrap_or_default();
-    println!(
-        "{:<6} {:<12} p{} {}{}",
-        fmt_id(t.id),
-        t.status,
-        t.priority,
-        t.title,
-        group_str
-    );
-}
-
 // === commands ===
-
-pub(crate) fn cmd_ls(status: Option<String>, group: Option<String>, json: bool) -> Result<()> {
-    let conn = open_db()?;
-    let all = load_all_tasks(&conn)?;
-    let filtered: Vec<&Task> = all
-        .iter()
-        .filter(|t| status.as_deref().map_or(true, |s| t.status == s))
-        .filter(|t| group.as_deref().map_or(true, |g| t.group.as_deref() == Some(g)))
-        .collect();
-    if json {
-        println!("{}", serde_json::to_string_pretty(&filtered)?);
-    } else if filtered.is_empty() {
-        println!("(no tasks)");
-    } else {
-        for t in filtered {
-            print_task_row(t);
-        }
-    }
-    Ok(())
-}
 
 pub(crate) fn cmd_show(id: String, json: bool) -> Result<()> {
     let id = parse_id(&id)?;
