@@ -203,7 +203,20 @@ impl App {
             KeyCode::Char('e') => {
                 self.open_edit_form();
             }
+            KeyCode::Char('S') => {
+                self.request_start(false);
+            }
             _ => {}
+        }
+    }
+
+    fn request_start(&mut self, tmux: bool) {
+        if let Some(task) = self.selected_task() {
+            self.pending_start = Some(StartRequest {
+                id: task.id,
+                tmux,
+            });
+            self.should_quit = true;
         }
     }
 
@@ -1172,6 +1185,26 @@ mod tests {
         app.handle_key(key(KeyCode::Char('y')));
         assert_eq!(app.screen, Screen::Main);
         assert!(app.tasks.is_empty());
+    }
+
+    #[test]
+    fn capital_s_sets_pending_start_no_tmux_and_quits() {
+        let mut app = mem_app_with(&[("a", "open", 2)]);
+        let id = app.selected_task().unwrap().id;
+        app.handle_key(key_with(KeyCode::Char('S'), KeyModifiers::SHIFT));
+        assert!(app.should_quit);
+        assert_eq!(
+            app.pending_start,
+            Some(StartRequest { id, tmux: false })
+        );
+    }
+
+    #[test]
+    fn capital_s_on_empty_list_is_a_noop() {
+        let mut app = mem_app();
+        app.handle_key(key_with(KeyCode::Char('S'), KeyModifiers::SHIFT));
+        assert!(!app.should_quit);
+        assert!(app.pending_start.is_none());
     }
 
     #[test]
