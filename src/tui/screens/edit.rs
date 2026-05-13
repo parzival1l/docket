@@ -106,6 +106,10 @@ impl EditState {
         } else {
             acceptance.lines().map(|s| s.to_string()).collect()
         };
+        let mut body_ta = TextArea::new(body_lines);
+        body_ta.set_placeholder_text("Markdown body (optional)");
+        let mut acc_ta = TextArea::new(acc_lines);
+        acc_ta.set_placeholder_text("- bullet criteria (optional)");
         Self {
             mode,
             field: EditField::Title,
@@ -113,8 +117,8 @@ impl EditState {
             priority: Input::default().with_value(priority.to_string()),
             group: Input::default().with_value(group.to_string()),
             deps: Input::default().with_value(deps.to_string()),
-            body: TextArea::new(body_lines),
-            acceptance: TextArea::new(acc_lines),
+            body: body_ta,
+            acceptance: acc_ta,
             error: None,
             orig_title: title.to_string(),
             orig_priority: priority.to_string(),
@@ -122,6 +126,44 @@ impl EditState {
             orig_deps: deps.to_string(),
             orig_body: body.to_string(),
             orig_acceptance: acceptance.to_string(),
+        }
+    }
+
+    /// Live, per-field validation. Returns the error for the currently
+    /// focused field only (or None if it's valid in isolation). Distinct
+    /// from `validate()` which checks all fields at save time.
+    pub fn current_field_error(&self) -> Option<String> {
+        match self.field {
+            EditField::Title => {
+                if self.title.value().trim().is_empty() {
+                    Some("title is required".into())
+                } else {
+                    None
+                }
+            }
+            EditField::Priority => {
+                let raw = self.priority.value().trim();
+                if raw.is_empty() {
+                    None
+                } else {
+                    match raw.parse::<i32>() {
+                        Ok(p) if (0..=4).contains(&p) => None,
+                        Ok(_) => Some("priority must be 0..=4".into()),
+                        Err(_) => Some("priority must be an integer".into()),
+                    }
+                }
+            }
+            EditField::Deps => {
+                let raw = self.deps.value().trim();
+                if raw.is_empty() {
+                    None
+                } else {
+                    crate::model::parse_deps(Some(raw.to_string()))
+                        .err()
+                        .map(|e| format!("deps: {}", e))
+                }
+            }
+            EditField::Group | EditField::Body | EditField::Acceptance => None,
         }
     }
 
@@ -259,6 +301,7 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
         frame,
         rows[0],
         "Title",
+        "task title",
         &state.title,
         state.field == EditField::Title,
     );
@@ -266,6 +309,7 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
         frame,
         rows[1],
         "Priority",
+        "0..4 (default 2)",
         &state.priority,
         state.field == EditField::Priority,
     );
@@ -273,6 +317,7 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
         frame,
         rows[2],
         "Group",
+        "optional, e.g. v0.1",
         &state.group,
         state.field == EditField::Group,
     );
@@ -280,6 +325,7 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
         frame,
         rows[3],
         "Deps",
+        "T-3, T-5 (optional)",
         &state.deps,
         state.field == EditField::Deps,
     );
@@ -323,9 +369,10 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
     .alignment(Alignment::Left);
     frame.render_widget(hint, rows[6]);
 
-    if let Some(err) = &state.error {
+    let display_err = state.error.clone().or_else(|| state.current_field_error());
+    if let Some(err) = display_err {
         let p = Paragraph::new(Span::styled(
-            err.clone(),
+            err,
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         ));
         frame.render_widget(p, rows[7]);
@@ -336,11 +383,13 @@ fn render_input_row(
     frame: &mut ratatui::Frame,
     area: ratatui::layout::Rect,
     label: &str,
+    placeholder: &str,
     input: &Input,
     focused: bool,
 ) {
     use ratatui::layout::{Constraint, Direction, Layout};
     use ratatui::style::{Color, Modifier, Style};
+    use ratatui::text::Span;
     use ratatui::widgets::{Block, Borders, Paragraph};
 
     let cols = Layout::default()
@@ -365,9 +414,18 @@ fn render_input_row(
         .border_style(border_style);
     let width = cols[1].width.saturating_sub(2) as usize;
     let scroll = input.visual_scroll(width);
-    let p = Paragraph::new(input.value())
-        .scroll((0, scroll as u16))
-        .block(block);
+
+    let p = if input.value().is_empty() && !placeholder.is_empty() {
+        Paragraph::new(Span::styled(
+            placeholder.to_string(),
+            Style::default().fg(Color::DarkGray),
+        ))
+        .block(block)
+    } else {
+        Paragraph::new(input.value())
+            .scroll((0, scroll as u16))
+            .block(block)
+    };
     frame.render_widget(p, cols[1]);
 }
 
@@ -570,5 +628,66 @@ mod tests {
         let mut s = EditState::for_add();
         s.title = Input::default().with_value("ok".into());
         assert!(s.validate().unwrap().body.is_none());
+    }
+
+    #[test]
+    fn current_field_error_blank_title() {
+        let s = EditState::for_add();
+        assert_eq!(
+            s.current_field_error().as_deref(),
+            Some("title is required")
+        );
+    }
+
+    #[test]
+    fn current_field_error_priority_out_of_range() {
+        let mut s = EditState::for_add();
+        s.field = EditField::Priority;
+        s.priority = Input::default().with_value("9".into());
+        assert!(s
+            .current_field_error()
+            .unwrap()
+            .contains("0..=4"));
+    }
+
+    #[test]
+    fn current_field_error_priority_non_numeric() {
+        let mut s = EditState::for_add();
+        s.field = EditField::Priority;
+        s.priority = Input::default().with_value("foo".into());
+        assert!(s
+            .current_field_error()
+            .unwrap()
+            .contains("integer"));
+    }
+
+    #[test]
+    fn current_field_error_priority_empty_is_ok() {
+        let mut s = EditState::for_add();
+        s.field = EditField::Priority;
+        assert!(s.current_field_error().is_none());
+    }
+
+    #[test]
+    fn current_field_error_deps_invalid() {
+        let mut s = EditState::for_add();
+        s.field = EditField::Deps;
+        s.deps = Input::default().with_value("garbage".into());
+        assert!(s.current_field_error().unwrap().contains("deps"));
+    }
+
+    #[test]
+    fn current_field_error_group_is_always_ok() {
+        let mut s = EditState::for_add();
+        s.field = EditField::Group;
+        s.group = Input::default().with_value("anything".into());
+        assert!(s.current_field_error().is_none());
+    }
+
+    #[test]
+    fn current_field_error_body_is_always_ok() {
+        let mut s = EditState::for_add();
+        s.field = EditField::Body;
+        assert!(s.current_field_error().is_none());
     }
 }

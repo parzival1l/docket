@@ -421,6 +421,9 @@ impl App {
         let Screen::Edit(state) = &mut self.screen else {
             return;
         };
+        // Clear any stale save-attempt error as soon as the user resumes
+        // typing; live per-field error takes over for ongoing feedback.
+        state.error = None;
         let event = crossterm::event::Event::Key(key);
         use crate::tui::screens::edit::EditField;
         use tui_input::backend::crossterm::EventHandler;
@@ -1280,6 +1283,71 @@ mod tests {
             .collect::<Vec<_>>()
             .join("");
         assert!(s.contains("hello"), "expected typed title in rendered buffer");
+    }
+
+    #[test]
+    fn edit_form_renders_priority_placeholder_when_empty() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('n')));
+        let backend = TestBackend::new(120, 60);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let s: String = buf
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(s.contains("0..4"), "priority placeholder should show");
+        assert!(s.contains("T-3, T-5"), "deps placeholder should show");
+    }
+
+    #[test]
+    fn edit_form_live_error_shows_when_priority_invalid() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('n')));
+        // Give title a value so it doesn't dominate the live-error slot.
+        for c in "ok".chars() {
+            app.handle_key(key(KeyCode::Char(c)));
+        }
+        app.handle_key(key(KeyCode::Tab)); // → Priority
+        app.handle_key(key(KeyCode::Char('9')));
+        let backend = TestBackend::new(120, 60);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let s: String = buf
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(s.contains("0..=4"), "live error should mention 0..=4");
+    }
+
+    #[test]
+    fn typing_after_save_error_clears_it() {
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('n')));
+        // Trigger save with blank title to set state.error.
+        app.handle_key(key_with(KeyCode::Char('s'), KeyModifiers::CONTROL));
+        if let Screen::Edit(state) = &app.screen {
+            assert!(state.error.is_some());
+        } else {
+            panic!();
+        }
+        // Now type a character — the stale save error should clear.
+        app.handle_key(key(KeyCode::Char('h')));
+        if let Screen::Edit(state) = &app.screen {
+            assert!(state.error.is_none());
+        } else {
+            panic!();
+        }
     }
 
     #[test]
