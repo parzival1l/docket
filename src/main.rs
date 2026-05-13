@@ -1,11 +1,12 @@
 use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
 
+mod cli;
 mod db;
 mod model;
 mod prompts;
@@ -16,113 +17,6 @@ use db::{
 };
 use model::{fmt_id, now, parse_deps, parse_id, Group, Task};
 use prompts::{assemble_prompt, PROMPT_COMMIT, PROMPT_CREATE_TASK, PROMPT_PR, PROMPT_TDD};
-
-#[derive(Parser)]
-#[command(name = "docket", version, about = "Agent-shaped task tracker with TDD execution harness")]
-struct Cli {
-    #[command(subcommand)]
-    command: Command,
-}
-
-#[derive(Subcommand)]
-enum Command {
-    /// Initialize .docket/ in the current repo
-    Init,
-    /// Add a task
-    Add {
-        title: String,
-        #[arg(long)]
-        body: Option<String>,
-        #[arg(long)]
-        acceptance: Option<String>,
-        /// Comma- or space-separated task IDs (e.g. "T-3,T-5" or "3 5")
-        #[arg(long)]
-        deps: Option<String>,
-        /// 0..4, lower = higher priority (default 2)
-        #[arg(long)]
-        priority: Option<i32>,
-        /// Group name; created lazily if it doesn't exist
-        #[arg(long)]
-        group: Option<String>,
-    },
-    /// List tasks
-    Ls {
-        #[arg(long)]
-        status: Option<String>,
-        #[arg(long)]
-        group: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Show a single task
-    Show {
-        id: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Tasks ready to pick up (open with all deps done)
-    Ready {
-        #[arg(long)]
-        group: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Tasks blocked by unmet deps (debug view)
-    Blocked {
-        #[arg(long)]
-        group: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Set status (open | in_progress | done — or any string)
-    Status { id: String, state: String },
-    /// Mark task done
-    Done { id: String },
-    /// Remove a task
-    Rm { id: String },
-    /// Print a prompt template to stdout
-    Prompt {
-        /// One of: tdd-pursuit, create-task, commit, pr
-        name: String,
-    },
-    /// Start a task: assemble its prompt and print to stdout, mark in_progress
-    Start {
-        id: String,
-        /// Open a new tmux window in the current session and deliver the prompt to it
-        #[arg(long)]
-        tmux: bool,
-    },
-    /// Group operations
-    Group {
-        #[command(subcommand)]
-        action: GroupCommand,
-    },
-}
-
-#[derive(Subcommand)]
-enum GroupCommand {
-    /// Create a new group
-    New {
-        name: String,
-        #[arg(long)]
-        branch: Option<String>,
-        #[arg(long)]
-        description: Option<String>,
-    },
-    /// List groups with task counts
-    Ls {
-        #[arg(long)]
-        json: bool,
-    },
-    /// Show a group with its tasks
-    Show {
-        name: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Mark a group closed
-    Close { name: String },
-}
 
 fn print_task_row(t: &Task) {
     let group_str = t
@@ -142,7 +36,7 @@ fn print_task_row(t: &Task) {
 
 // === commands ===
 
-fn cmd_init() -> Result<()> {
+pub(crate) fn cmd_init() -> Result<()> {
     let cwd = std::env::current_dir()?;
     let root = find_repo_root(&cwd).ok_or_else(|| anyhow!("not in a git repo"))?;
     let dir = root.join(".docket");
@@ -184,7 +78,7 @@ fn cmd_init() -> Result<()> {
     Ok(())
 }
 
-fn cmd_add(
+pub(crate) fn cmd_add(
     title: String,
     body: Option<String>,
     acceptance: Option<String>,
@@ -214,7 +108,7 @@ fn cmd_add(
     Ok(())
 }
 
-fn cmd_ls(status: Option<String>, group: Option<String>, json: bool) -> Result<()> {
+pub(crate) fn cmd_ls(status: Option<String>, group: Option<String>, json: bool) -> Result<()> {
     let conn = open_db()?;
     let all = load_all_tasks(&conn)?;
     let filtered: Vec<&Task> = all
@@ -234,7 +128,7 @@ fn cmd_ls(status: Option<String>, group: Option<String>, json: bool) -> Result<(
     Ok(())
 }
 
-fn cmd_show(id: String, json: bool) -> Result<()> {
+pub(crate) fn cmd_show(id: String, json: bool) -> Result<()> {
     let id = parse_id(&id)?;
     let conn = open_db()?;
     let all = load_all_tasks(&conn)?;
@@ -280,7 +174,7 @@ fn cmd_show(id: String, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn cmd_ready(group: Option<String>, json: bool) -> Result<()> {
+pub(crate) fn cmd_ready(group: Option<String>, json: bool) -> Result<()> {
     let conn = open_db()?;
     let all = load_all_tasks(&conn)?;
     let by_id: HashMap<i64, &Task> = all.iter().map(|t| (t.id, t)).collect();
@@ -306,7 +200,7 @@ fn cmd_ready(group: Option<String>, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn cmd_blocked(group: Option<String>, json: bool) -> Result<()> {
+pub(crate) fn cmd_blocked(group: Option<String>, json: bool) -> Result<()> {
     let conn = open_db()?;
     let all = load_all_tasks(&conn)?;
     let by_id: HashMap<i64, &Task> = all.iter().map(|t| (t.id, t)).collect();
@@ -357,7 +251,7 @@ fn cmd_blocked(group: Option<String>, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn cmd_status(id: String, state: String) -> Result<()> {
+pub(crate) fn cmd_status(id: String, state: String) -> Result<()> {
     let id = parse_id(&id)?;
     let conn = open_db()?;
     let n = db::set_status(&conn, id, &state)?;
@@ -368,11 +262,11 @@ fn cmd_status(id: String, state: String) -> Result<()> {
     Ok(())
 }
 
-fn cmd_done(id: String) -> Result<()> {
+pub(crate) fn cmd_done(id: String) -> Result<()> {
     cmd_status(id, "done".into())
 }
 
-fn cmd_rm(id: String) -> Result<()> {
+pub(crate) fn cmd_rm(id: String) -> Result<()> {
     let id = parse_id(&id)?;
     let conn = open_db()?;
     let n = db::delete_task(&conn, id)?;
@@ -383,7 +277,7 @@ fn cmd_rm(id: String) -> Result<()> {
     Ok(())
 }
 
-fn cmd_prompt(name: String) -> Result<()> {
+pub(crate) fn cmd_prompt(name: String) -> Result<()> {
     let body = match name.as_str() {
         "tdd-pursuit" | "tdd" => PROMPT_TDD,
         "create-task" | "create" => PROMPT_CREATE_TASK,
@@ -408,7 +302,7 @@ fn mark_in_progress(conn: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
-fn cmd_start(id: String, tmux: bool) -> Result<()> {
+pub(crate) fn cmd_start(id: String, tmux: bool) -> Result<()> {
     let id = parse_id(&id)?;
     let conn = open_db()?;
     let all = load_all_tasks(&conn)?;
@@ -480,7 +374,7 @@ fn deliver_via_tmux(id: i64, prompt: &str) -> Result<()> {
     Ok(())
 }
 
-fn cmd_group_new(
+pub(crate) fn cmd_group_new(
     name: String,
     branch: Option<String>,
     description: Option<String>,
@@ -498,7 +392,7 @@ fn cmd_group_new(
     Ok(())
 }
 
-fn cmd_group_ls(json: bool) -> Result<()> {
+pub(crate) fn cmd_group_ls(json: bool) -> Result<()> {
     let conn = open_db()?;
     let groups = load_all_groups(&conn)?;
 
@@ -535,7 +429,7 @@ fn cmd_group_ls(json: bool) -> Result<()> {
     Ok(())
 }
 
-fn cmd_group_show(name: String, json: bool) -> Result<()> {
+pub(crate) fn cmd_group_show(name: String, json: bool) -> Result<()> {
     let conn = open_db()?;
     let g = load_group_by_name(&conn, &name)?
         .ok_or_else(|| anyhow!("group `{}` not found", name))?;
@@ -580,7 +474,7 @@ fn cmd_group_show(name: String, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn cmd_group_close(name: String) -> Result<()> {
+pub(crate) fn cmd_group_close(name: String) -> Result<()> {
     let conn = open_db()?;
     let n = conn.execute(
         "UPDATE groups SET state = 'closed' WHERE name = ?1",
@@ -594,37 +488,7 @@ fn cmd_group_close(name: String) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    let cli = Cli::parse();
-    match cli.command {
-        Command::Init => cmd_init()?,
-        Command::Add {
-            title,
-            body,
-            acceptance,
-            deps,
-            priority,
-            group,
-        } => cmd_add(title, body, acceptance, deps, priority, group)?,
-        Command::Ls { status, group, json } => cmd_ls(status, group, json)?,
-        Command::Show { id, json } => cmd_show(id, json)?,
-        Command::Ready { group, json } => cmd_ready(group, json)?,
-        Command::Blocked { group, json } => cmd_blocked(group, json)?,
-        Command::Status { id, state } => cmd_status(id, state)?,
-        Command::Done { id } => cmd_done(id)?,
-        Command::Rm { id } => cmd_rm(id)?,
-        Command::Prompt { name } => cmd_prompt(name)?,
-        Command::Start { id, tmux } => cmd_start(id, tmux)?,
-        Command::Group { action } => match action {
-            GroupCommand::New {
-                name,
-                branch,
-                description,
-            } => cmd_group_new(name, branch, description)?,
-            GroupCommand::Ls { json } => cmd_group_ls(json)?,
-            GroupCommand::Show { name, json } => cmd_group_show(name, json)?,
-            GroupCommand::Close { name } => cmd_group_close(name)?,
-        },
-    }
-    Ok(())
+    let args = cli::Cli::parse();
+    cli::dispatch(args)
 }
 
