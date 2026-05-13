@@ -199,13 +199,17 @@ fn cmd_add(
     };
     let deps_json = parse_deps(deps)?;
     let priority = priority.unwrap_or(2);
-    let n = now();
-    conn.execute(
-        "INSERT INTO tasks (title, body, acceptance, deps, status, priority, group_id, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, 'open', ?5, ?6, ?7, ?7)",
-        params![title, body, acceptance, deps_json, priority, group_id, n],
+    let id = db::insert_task(
+        &conn,
+        db::NewTask {
+            title: &title,
+            body: body.as_deref(),
+            acceptance: acceptance.as_deref(),
+            deps_json: deps_json.as_deref(),
+            priority,
+            group_id,
+        },
     )?;
-    let id = conn.last_insert_rowid();
     println!("{} added", fmt_id(id));
     Ok(())
 }
@@ -356,10 +360,7 @@ fn cmd_blocked(group: Option<String>, json: bool) -> Result<()> {
 fn cmd_status(id: String, state: String) -> Result<()> {
     let id = parse_id(&id)?;
     let conn = open_db()?;
-    let n = conn.execute(
-        "UPDATE tasks SET status = ?1, updated_at = ?2 WHERE id = ?3",
-        params![state, now(), id],
-    )?;
+    let n = db::set_status(&conn, id, &state)?;
     if n == 0 {
         return Err(anyhow!("{} not found", fmt_id(id)));
     }
@@ -374,7 +375,7 @@ fn cmd_done(id: String) -> Result<()> {
 fn cmd_rm(id: String) -> Result<()> {
     let id = parse_id(&id)?;
     let conn = open_db()?;
-    let n = conn.execute("DELETE FROM tasks WHERE id = ?1", params![id])?;
+    let n = db::delete_task(&conn, id)?;
     if n == 0 {
         return Err(anyhow!("{} not found", fmt_id(id)));
     }
