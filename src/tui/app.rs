@@ -380,8 +380,12 @@ impl App {
                 return;
             }
             (KeyCode::Esc, _) => {
-                // Dirty path lands in Task 9; today Esc always closes.
-                self.screen = Screen::Main;
+                let dirty = matches!(&self.screen, Screen::Edit(state) if state.is_dirty());
+                if dirty {
+                    self.screen = Screen::Confirm(PendingAction::DiscardEdits);
+                } else {
+                    self.screen = Screen::Main;
+                }
                 return;
             }
             _ => {}
@@ -1139,6 +1143,36 @@ mod tests {
         app.handle_key(key_with(KeyCode::Char('s'), KeyModifiers::CONTROL));
         assert!(matches!(app.screen, Screen::Edit(_)));
         assert_eq!(app.tasks.len(), 0);
+    }
+
+    #[test]
+    fn esc_on_dirty_form_opens_discard_confirm() {
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('n')));
+        app.handle_key(key(KeyCode::Char('x')));
+        app.handle_key(key(KeyCode::Esc));
+        assert_eq!(app.screen, Screen::Confirm(PendingAction::DiscardEdits));
+    }
+
+    #[test]
+    fn discard_confirm_y_returns_to_main_and_drops_edits() {
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('n')));
+        app.handle_key(key(KeyCode::Char('x')));
+        app.handle_key(key(KeyCode::Esc));
+        app.handle_key(key(KeyCode::Char('y')));
+        assert_eq!(app.screen, Screen::Main);
+        assert!(app.tasks.is_empty());
+    }
+
+    #[test]
+    fn discard_confirm_n_returns_to_main_today() {
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('n')));
+        app.handle_key(key(KeyCode::Char('x')));
+        app.handle_key(key(KeyCode::Esc));
+        app.handle_key(key(KeyCode::Char('n')));
+        assert_eq!(app.screen, Screen::Main);
     }
 
     #[test]

@@ -17,7 +17,6 @@ pub enum FilterKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PendingAction {
     DeleteTask { id: i64, title: String },
-    #[allow(dead_code)] // constructed in PR-5 Task 9
     DiscardEdits,
 }
 
