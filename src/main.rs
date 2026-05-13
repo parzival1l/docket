@@ -1,44 +1,21 @@
 use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
 use clap::{Parser, Subcommand};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
 
+mod db;
 mod model;
 mod prompts;
 
-use model::{deps_from_db, fmt_id, now, parse_deps, parse_id, Group, Task};
+use db::{
+    find_repo_root, get_or_create_group, init_schema, load_all_groups, load_all_tasks,
+    load_group_by_name, open_db,
+};
+use model::{fmt_id, now, parse_deps, parse_id, Group, Task};
 use prompts::{assemble_prompt, PROMPT_COMMIT, PROMPT_CREATE_TASK, PROMPT_PR, PROMPT_TDD};
-
-const SCHEMA: &str = r#"
-CREATE TABLE IF NOT EXISTS groups (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    name         TEXT NOT NULL UNIQUE,
-    branch_name  TEXT,
-    description  TEXT,
-    state        TEXT NOT NULL DEFAULT 'open',
-    created_at   TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS tasks (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    title       TEXT NOT NULL,
-    body        TEXT,
-    acceptance  TEXT,
-    deps        TEXT,
-    status      TEXT NOT NULL DEFAULT 'open',
-    priority    INTEGER NOT NULL DEFAULT 2,
-    group_id    INTEGER REFERENCES groups(id),
-    created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
-CREATE INDEX IF NOT EXISTS idx_tasks_group  ON tasks(group_id);
-"#;
 
 #[derive(Parser)]
 #[command(name = "docket", version, about = "Agent-shaped task tracker with TDD execution harness")]
@@ -147,82 +124,6 @@ enum GroupCommand {
     Close { name: String },
 }
 
-fn find_repo_root(start: &Path) -> Option<PathBuf> {
-    let mut p = start.to_path_buf();
-    loop {
-        if p.join(".git").exists() {
-            return Some(p);
-        }
-        if !p.pop() {
-            return None;
-        }
-    }
-}
-
-fn docket_dir() -> Result<PathBuf> {
-    let cwd = std::env::current_dir()?;
-    let root = find_repo_root(&cwd)
-        .ok_or_else(|| anyhow!("not in a git repo (run from inside one, or `git init` first)"))?;
-    Ok(root.join(".docket"))
-}
-
-fn open_db() -> Result<Connection> {
-    let path = docket_dir()?.join("db.sqlite");
-    if !path.exists() {
-        return Err(anyhow!(
-            ".docket/ not initialized in this repo — run `docket init` first"
-        ));
-    }
-    Ok(Connection::open(&path)?)
-}
-
-fn load_all_tasks(conn: &Connection) -> Result<Vec<Task>> {
-    let mut stmt = conn.prepare(
-        "SELECT t.id, t.title, t.body, t.acceptance, t.deps, t.status, t.priority,
-                g.name, t.created_at, t.updated_at
-         FROM tasks t LEFT JOIN groups g ON t.group_id = g.id
-         ORDER BY t.priority, t.id",
-    )?;
-    let tasks = stmt
-        .query_map([], |r| {
-            let deps_raw: Option<String> = r.get(4)?;
-            Ok(Task {
-                id: r.get(0)?,
-                title: r.get(1)?,
-                body: r.get(2)?,
-                acceptance: r.get(3)?,
-                deps: deps_from_db(deps_raw),
-                status: r.get(5)?,
-                priority: r.get(6)?,
-                group: r.get(7)?,
-                created_at: r.get(8)?,
-                updated_at: r.get(9)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(tasks)
-}
-
-fn get_or_create_group(conn: &Connection, name: &str) -> Result<i64> {
-    let existing: Option<i64> = conn
-        .query_row(
-            "SELECT id FROM groups WHERE name = ?1",
-            params![name],
-            |r| r.get(0),
-        )
-        .optional()?;
-    match existing {
-        Some(id) => Ok(id),
-        None => {
-            conn.execute(
-                "INSERT INTO groups (name, state, created_at) VALUES (?1, 'open', ?2)",
-                params![name, now()],
-            )?;
-            Ok(conn.last_insert_rowid())
-        }
-    }
-}
-
 fn print_task_row(t: &Task) {
     let group_str = t
         .group
@@ -253,7 +154,7 @@ fn cmd_init() -> Result<()> {
     }
 
     let conn = Connection::open(&db)?;
-    conn.execute_batch(SCHEMA)?;
+    init_schema(&conn)?;
     println!("initialized {}", db.display());
 
     let gi = root.join(".gitignore");
@@ -584,14 +485,7 @@ fn cmd_group_new(
     description: Option<String>,
 ) -> Result<()> {
     let conn = open_db()?;
-    let existing: Option<i64> = conn
-        .query_row(
-            "SELECT id FROM groups WHERE name = ?1",
-            params![name],
-            |r| r.get(0),
-        )
-        .optional()?;
-    if existing.is_some() {
+    if load_group_by_name(&conn, &name)?.is_some() {
         return Err(anyhow!("group `{}` already exists", name));
     }
     conn.execute(
@@ -605,21 +499,7 @@ fn cmd_group_new(
 
 fn cmd_group_ls(json: bool) -> Result<()> {
     let conn = open_db()?;
-    let mut stmt = conn.prepare(
-        "SELECT id, name, branch_name, description, state, created_at FROM groups ORDER BY name",
-    )?;
-    let groups: Vec<Group> = stmt
-        .query_map([], |r| {
-            Ok(Group {
-                id: r.get(0)?,
-                name: r.get(1)?,
-                branch_name: r.get(2)?,
-                description: r.get(3)?,
-                state: r.get(4)?,
-                created_at: r.get(5)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+    let groups = load_all_groups(&conn)?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&groups)?);
@@ -656,22 +536,7 @@ fn cmd_group_ls(json: bool) -> Result<()> {
 
 fn cmd_group_show(name: String, json: bool) -> Result<()> {
     let conn = open_db()?;
-    let g = conn
-        .query_row(
-            "SELECT id, name, branch_name, description, state, created_at FROM groups WHERE name = ?1",
-            params![name],
-            |r| {
-                Ok(Group {
-                    id: r.get(0)?,
-                    name: r.get(1)?,
-                    branch_name: r.get(2)?,
-                    description: r.get(3)?,
-                    state: r.get(4)?,
-                    created_at: r.get(5)?,
-                })
-            },
-        )
-        .optional()?
+    let g = load_group_by_name(&conn, &name)?
         .ok_or_else(|| anyhow!("group `{}` not found", name))?;
 
     let all = load_all_tasks(&conn)?;
