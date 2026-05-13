@@ -18,23 +18,6 @@ use prompts::{assemble_prompt, PROMPT_COMMIT, PROMPT_CREATE_TASK, PROMPT_PR, PRO
 
 // === commands ===
 
-pub(crate) fn cmd_prompt(name: String) -> Result<()> {
-    let body = match name.as_str() {
-        "tdd-pursuit" | "tdd" => PROMPT_TDD,
-        "create-task" | "create" => PROMPT_CREATE_TASK,
-        "commit" => PROMPT_COMMIT,
-        "pr" => PROMPT_PR,
-        other => {
-            return Err(anyhow!(
-                "unknown prompt: {}\nknown: tdd-pursuit, create-task, commit, pr",
-                other
-            ))
-        }
-    };
-    print!("{}", body);
-    Ok(())
-}
-
 fn mark_in_progress(conn: &Connection, id: i64) -> Result<()> {
     conn.execute(
         "UPDATE tasks SET status = 'in_progress', updated_at = ?1 WHERE id = ?2",
