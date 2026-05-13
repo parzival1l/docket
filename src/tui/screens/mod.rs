@@ -27,7 +27,6 @@ pub enum Screen {
     Help,
     FilterPrompt { kind: FilterKind, input: String },
     Confirm(PendingAction),
-    #[allow(dead_code)] // constructed in PR-5 Task 4
     Edit(Box<EditState>),
 }
 

@@ -1,6 +1,7 @@
 use crate::db::{load_all_tasks, open_db};
 use crate::model::Task;
 use crate::tui::filters::{filtered_indices, Filters};
+use crate::tui::screens::edit::EditState;
 use crate::tui::screens::{FilterKind, PendingAction, Screen};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -188,6 +189,12 @@ impl App {
             KeyCode::Char('x') => {
                 self.open_delete_confirm();
             }
+            KeyCode::Char('n') => {
+                self.open_add_form();
+            }
+            KeyCode::Char('e') => {
+                self.open_edit_form();
+            }
             _ => {}
         }
     }
@@ -226,8 +233,24 @@ impl App {
     }
 
     fn handle_detail(&mut self, key: KeyEvent) {
-        if matches!(key.code, KeyCode::Char('h') | KeyCode::Left) {
-            self.focus = Pane::List;
+        match key.code {
+            KeyCode::Char('h') | KeyCode::Left => {
+                self.focus = Pane::List;
+            }
+            KeyCode::Char('e') => {
+                self.open_edit_form();
+            }
+            _ => {}
+        }
+    }
+
+    fn open_add_form(&mut self) {
+        self.screen = Screen::Edit(Box::new(EditState::for_add()));
+    }
+
+    fn open_edit_form(&mut self) {
+        if let Some(task) = self.selected_task() {
+            self.screen = Screen::Edit(Box::new(EditState::for_edit(task)));
         }
     }
 
@@ -764,6 +787,66 @@ mod tests {
         app.handle_key(key(KeyCode::Char('y')));
         assert_eq!(app.cursor, 0);
         assert_eq!(app.tasks.len(), 1);
+    }
+
+    #[test]
+    fn n_opens_add_form_with_blank_state() {
+        use crate::tui::screens::edit::{EditField, EditMode};
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('n')));
+        match &app.screen {
+            Screen::Edit(state) => {
+                assert_eq!(state.mode, EditMode::Add);
+                assert_eq!(state.field, EditField::Title);
+                assert_eq!(state.title.value(), "");
+            }
+            other => panic!("expected Screen::Edit, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn e_from_list_opens_edit_form_for_cursor_task() {
+        use crate::tui::screens::edit::EditMode;
+        let mut app = mem_app_with(&[("hello", "open", 2)]);
+        let id = app.selected_task().unwrap().id;
+        app.handle_key(key(KeyCode::Char('e')));
+        match &app.screen {
+            Screen::Edit(state) => {
+                assert_eq!(state.mode, EditMode::Edit { id });
+                assert_eq!(state.title.value(), "hello");
+            }
+            other => panic!("expected Screen::Edit, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn e_from_detail_pane_also_opens_edit_form() {
+        use crate::tui::screens::edit::EditMode;
+        let mut app = mem_app_with(&[("hello", "open", 2)]);
+        let id = app.selected_task().unwrap().id;
+        app.handle_key(key(KeyCode::Char('l')));
+        assert_eq!(app.focus, Pane::Detail);
+        app.handle_key(key(KeyCode::Char('e')));
+        match &app.screen {
+            Screen::Edit(state) => {
+                assert_eq!(state.mode, EditMode::Edit { id });
+            }
+            other => panic!("expected Screen::Edit, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn e_on_empty_list_does_not_open_form() {
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('e')));
+        assert_eq!(app.screen, Screen::Main);
+    }
+
+    #[test]
+    fn n_works_on_empty_list() {
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('n')));
+        assert!(matches!(app.screen, Screen::Edit(_)));
     }
 
     #[test]
