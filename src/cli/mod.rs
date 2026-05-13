@@ -6,6 +6,7 @@ use crate::model::{fmt_id, Task};
 pub mod add;
 pub mod init;
 pub mod ls;
+pub mod ready;
 pub mod show;
 
 pub(crate) fn print_task_row(t: &Task) {
@@ -144,7 +145,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         } => add::run(title, body, acceptance, deps, priority, group),
         Command::Ls { status, group, json } => ls::run(status, group, json),
         Command::Show { id, json } => show::run(id, json),
-        Command::Ready { group, json } => crate::cmd_ready(group, json),
+        Command::Ready { group, json } => ready::run(group, json),
         Command::Blocked { group, json } => crate::cmd_blocked(group, json),
         Command::Status { id, state } => crate::cmd_status(id, state),
         Command::Done { id } => crate::cmd_done(id),
