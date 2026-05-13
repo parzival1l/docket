@@ -7,7 +7,7 @@ use ratatui::Frame;
 use crate::tui::keybindings::{Scope, COMMAND_REGISTRY};
 
 pub fn render(frame: &mut Frame) {
-    let area = centered_rect(60, 70, frame.area());
+    let area = centered_rect(60, 85, frame.area());
     frame.render_widget(Clear, area);
 
     let mut lines: Vec<Line> = Vec::new();
@@ -17,6 +17,7 @@ pub fn render(frame: &mut Frame) {
         Scope::Detail,
         Scope::FilterPrompt,
         Scope::Confirm,
+        Scope::Edit,
     ] {
         let scope_label = match scope {
             Scope::Global => "Global",
@@ -25,6 +26,7 @@ pub fn render(frame: &mut Frame) {
             Scope::Help => "Help",
             Scope::FilterPrompt => "Filter prompt",
             Scope::Confirm => "Confirm",
+            Scope::Edit => "Edit form",
         };
         lines.push(Line::from(Span::styled(
             scope_label.to_string(),

@@ -6,6 +6,7 @@ pub enum Scope {
     Help,
     FilterPrompt,
     Confirm,
+    Edit,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -24,6 +25,8 @@ pub const COMMAND_REGISTRY: &[Binding] = &[
     Binding { keys: "j/k", label: "nav", scope: Scope::List, footer: true },
     Binding { keys: "g/G", label: "top/bottom", scope: Scope::List, footer: false },
     Binding { keys: "l", label: "detail", scope: Scope::List, footer: true },
+    Binding { keys: "n", label: "new", scope: Scope::List, footer: true },
+    Binding { keys: "e", label: "edit", scope: Scope::List, footer: true },
     Binding { keys: "s", label: "cycle status", scope: Scope::List, footer: true },
     Binding { keys: "d", label: "done", scope: Scope::List, footer: true },
     Binding { keys: "x", label: "delete", scope: Scope::List, footer: true },
@@ -34,12 +37,16 @@ pub const COMMAND_REGISTRY: &[Binding] = &[
     Binding { keys: "f b", label: "blocked", scope: Scope::List, footer: false },
     Binding { keys: "f c", label: "clear filters", scope: Scope::List, footer: true },
     Binding { keys: "h", label: "list", scope: Scope::Detail, footer: true },
+    Binding { keys: "e", label: "edit", scope: Scope::Detail, footer: true },
     Binding { keys: "PgUp/PgDn", label: "scroll", scope: Scope::Detail, footer: true },
     Binding { keys: "?/Esc", label: "close help", scope: Scope::Help, footer: true },
     Binding { keys: "Enter", label: "apply", scope: Scope::FilterPrompt, footer: true },
     Binding { keys: "Esc", label: "cancel", scope: Scope::FilterPrompt, footer: true },
     Binding { keys: "y/Enter", label: "confirm", scope: Scope::Confirm, footer: true },
     Binding { keys: "n/Esc", label: "cancel", scope: Scope::Confirm, footer: true },
+    Binding { keys: "Tab/S-Tab", label: "next/prev field", scope: Scope::Edit, footer: true },
+    Binding { keys: "Ctrl+S", label: "save", scope: Scope::Edit, footer: true },
+    Binding { keys: "Esc", label: "cancel", scope: Scope::Edit, footer: true },
 ];
 
 pub fn footer_for(scope: Scope) -> Vec<Binding> {
@@ -110,5 +117,30 @@ mod tests {
         let labels: Vec<&str> = fb.iter().map(|b| b.label).collect();
         assert!(labels.contains(&"confirm"));
         assert!(labels.contains(&"cancel"));
+    }
+
+    #[test]
+    fn registry_contains_edit_form_keys() {
+        assert!(COMMAND_REGISTRY
+            .iter()
+            .any(|b| b.keys == "Ctrl+S" && b.scope == Scope::Edit));
+        assert!(COMMAND_REGISTRY
+            .iter()
+            .any(|b| b.keys == "n" && b.scope == Scope::List));
+        assert!(COMMAND_REGISTRY
+            .iter()
+            .any(|b| b.keys == "e" && b.scope == Scope::List));
+        assert!(COMMAND_REGISTRY
+            .iter()
+            .any(|b| b.keys == "e" && b.scope == Scope::Detail));
+    }
+
+    #[test]
+    fn footer_for_edit_includes_save_and_cancel() {
+        let fb = footer_for(Scope::Edit);
+        let labels: Vec<&str> = fb.iter().map(|b| b.label).collect();
+        assert!(labels.contains(&"save"));
+        assert!(labels.contains(&"cancel"));
+        assert!(labels.contains(&"next/prev field"));
     }
 }
