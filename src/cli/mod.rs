@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 use crate::model::{fmt_id, Task};
 
 pub mod add;
+pub mod blocked;
 pub mod init;
 pub mod ls;
 pub mod ready;
@@ -146,7 +147,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         Command::Ls { status, group, json } => ls::run(status, group, json),
         Command::Show { id, json } => show::run(id, json),
         Command::Ready { group, json } => ready::run(group, json),
-        Command::Blocked { group, json } => crate::cmd_blocked(group, json),
+        Command::Blocked { group, json } => blocked::run(group, json),
         Command::Status { id, state } => crate::cmd_status(id, state),
         Command::Done { id } => crate::cmd_done(id),
         Command::Rm { id } => crate::cmd_rm(id),
