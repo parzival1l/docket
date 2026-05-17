@@ -47,9 +47,9 @@ pub enum Command {
     /// Add a task
     Add {
         title: String,
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         body: Option<String>,
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         acceptance: Option<String>,
         /// Comma- or space-separated task IDs (e.g. "T-3,T-5" or "3 5")
         #[arg(long)]
@@ -101,9 +101,9 @@ pub enum Command {
         id: String,
         #[arg(long)]
         title: Option<String>,
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         body: Option<String>,
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         acceptance: Option<String>,
         /// Comma- or space-separated task IDs (e.g. "T-3,T-5" or "3 5"); replaces existing deps
         #[arg(long)]
