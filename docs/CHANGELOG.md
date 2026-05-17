@@ -10,6 +10,23 @@ GitHub Release body for the matching tag — keep entries written for that audie
 
 ## [Unreleased]
 
+The TUI release. Lands an interactive `docket tui` for navigating, mutating, and starting tasks without leaving the keyboard, plus a `docket update` subcommand for editing tasks in place. The CLI core was extracted into modules along the way (`cli/`, `db/`, `model/`, `prompts/`, `tui/`) so the TUI and CLI share a single data layer.
+
+### Added
+
+- `docket tui` — interactive terminal UI built on ratatui/crossterm. List/detail panes, filters, help overlay, chord-driven keybindings via a scope-based command registry. Keys: `s` cycles status (open → in_progress → done), `d` marks done, `x` deletes (with confirm modal), `n`/`e` open Add/Edit forms, `Tab`/`Shift+Tab` cycle fields, `Ctrl+S` saves, `Esc` on dirty form prompts to discard, `S`/`Ctrl+S` start the cursor task (tmux variant for the latter), live per-field validation with placeholder hints.
+- `docket update <id>` — partial-field updates for title, body, acceptance, deps, priority, and group. Requires at least one field; lazily creates the group if missing; replaces deps exactly; bumps `updated_at`. Covered by integration tests for help, flag presence, deps replacement, group creation, missing id, and multi-field updates.
+- `docket start --tmux` upgraded — now creates and attaches a fresh tmux session, spawning a terminal if invoked outside of tmux (T-4). The 0.0.2 implementation only opened a window inside an existing session; this closes the gap for "I just want to start a task in a new pane from anywhere."
+
+### Changed
+
+- `docket add` accepts hyphen-prefixed values (e.g. `--body "- bullet"`) without clap mistaking them for flags.
+- `src/main.rs` modularized: `cli/` (one file per subcommand handler + dispatcher), `db/` (schema, connection, read-side queries, mutation helpers), `model/` (Task, Group, parse helpers), `prompts/`, `tui/`. The single 750-line `main.rs` is now a ten-line entry point.
+
+### Tests
+
+- End-to-end tests for `add`/`update`/`start` against the built binary; unit tests pin `parse_id`, `parse_deps`, `deps_from_db`.
+
 ## [0.0.2] - 2026-05-09
 
 The handoff release. Closes the loop between picking a task and handing it to an agent — `docket start` assembles a task's body, acceptance, and the embedded `tdd-pursuit` discipline into a single ready-to-pipe brief, optionally delivered into a fresh tmux window. Also lands the Claude Code plugin and stands up tag-driven release automation so future versions ship from a two-command flow.
