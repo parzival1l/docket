@@ -65,11 +65,14 @@ pub enum Command {
         /// One of: bug, feature, chore, docs, spike (default: feature)
         #[arg(long, value_parser = ["bug", "feature", "chore", "docs", "spike"])]
         kind: Option<String>,
-        /// Park the task in the backlog (status = 'backlog') instead of `open`
+        /// Park the task in the backlog instead of `open` — captures the idea without
+        /// cluttering `ls`/`ready`. Surface it later with `docket backlog`, pull it
+        /// onto the active board with `docket promote T-N`.
         #[arg(long)]
         backlog: bool,
     },
-    /// List tasks
+    /// List active tasks. Hides `backlog` by default; pass `--status backlog`
+    /// (or use `docket backlog`) to see parked tasks.
     Ls {
         #[arg(long)]
         status: Option<String>,
@@ -87,21 +90,24 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Tasks ready to pick up (open with all deps done)
+    /// Tasks ready to pick up (status = `open` with all deps `done`).
+    /// Backlog tasks are excluded — promote them first with `docket promote T-N`.
     Ready {
         #[arg(long)]
         group: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// Tasks blocked by unmet deps (debug view)
+    /// Tasks blocked by unmet deps (debug view). Backlog tasks are excluded.
     Blocked {
         #[arg(long)]
         group: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// List tasks parked in the backlog (status = 'backlog')
+    /// List parked tasks (status = `backlog`). The backlog is a separate "later" list
+    /// that does NOT appear in `ls`/`ready`/`blocked`. Use `docket promote T-N` to
+    /// move a task from here onto the active board.
     Backlog {
         #[arg(long)]
         group: Option<String>,
@@ -111,9 +117,11 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Promote a backlog task to `open`
+    /// Move a task from `backlog` to `open` (pull it onto the active board).
+    /// Errors if the task isn't currently in backlog.
     Promote { id: String },
-    /// Set status (open | in_progress | done — or any string)
+    /// Set status (backlog | open | in_progress | done — or any string).
+    /// Lifecycle: backlog → open → in_progress → done.
     Status { id: String, state: String },
     /// Mark task done
     Done { id: String },
