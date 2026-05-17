@@ -1,6 +1,6 @@
 [package]
 name = "docket"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2021"
 description = "Agent-shaped task tracker with TDD execution harness"
 

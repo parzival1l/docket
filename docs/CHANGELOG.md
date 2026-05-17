@@ -10,6 +10,26 @@ GitHub Release body for the matching tag — keep entries written for that audie
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-05-17
+
+Backlog and task-kind release. Introduces a dedicated `backlog` status so tasks can be parked without polluting the `open` queue, adds a first-class `kind` field for distinguishing features from bugs/chores, and lets `docket` launch straight into the TUI when invoked bare. Also lands a batch of TUI polish: fewer error states, better edit-form ergonomics, and wider test coverage.
+
+### Added
+
+- `docket backlog` — new top-level command that lists backlog tasks; `docket backlog add` parks a new task directly in the backlog (T-10).
+- `backlog` status across the model — `docket add --status backlog`, `docket status <id> backlog`, and `docket ls --status backlog` all recognize the new state; backlog tasks are excluded from default `ls`/`ready` output (T-10).
+- `kind` field on tasks — every task now carries a kind (defaults to `feature`; known kinds include `feature`, `bug`, `chore`). Propagated through `add`, `update`, `show`, `ls`, and the TUI list/detail/edit views. Schema migration adds the column on existing databases (T-9).
+- Bare `docket` invocation launches the TUI — running `docket` with no subcommand now opens the interactive UI instead of printing help (T-16).
+
+### Changed
+
+- TUI edit screen overhauled — improved field navigation, validation feedback, and reduced error states when saving partial edits (T-9).
+- `docket` plugin description expanded so the marketplace listing better reflects current capabilities (T-11).
+
+### Tests
+
+- Integration coverage for `backlog` add/list/status transitions, `kind` defaulting and explicit values across CLI verbs, bare-invocation TUI launch, and `update` flows for the new fields.
+
 ## [0.0.3] - 2026-05-17
 
 The TUI release. Lands an interactive `docket tui` for navigating, mutating, and starting tasks without leaving the keyboard, plus a `docket update` subcommand for editing tasks in place. The CLI core was extracted into modules along the way (`cli/`, `db/`, `model/`, `prompts/`, `tui/`) so the TUI and CLI share a single data layer.
@@ -68,7 +88,8 @@ Initial release. v1 CLI shell with embedded prompts and bundled SQLite store.
 
 - Versioning starts at `0.0.x` deliberately. Every shipped item bumps the patch (0.0.2, 0.0.3, …). The cut to `0.1.0` is **maintainer judgment, not a feature checklist** — it happens when the loop feels solid for daily use. `docket start` landing is the most likely trigger but is not by itself sufficient.
 
-[Unreleased]: https://github.com/parzival1l/docket/compare/v0.0.3...HEAD
+[Unreleased]: https://github.com/parzival1l/docket/compare/v0.0.4...HEAD
+[0.0.4]: https://github.com/parzival1l/docket/releases/tag/v0.0.4
 [0.0.3]: https://github.com/parzival1l/docket/releases/tag/v0.0.3
 [0.0.2]: https://github.com/parzival1l/docket/releases/tag/v0.0.2
 [0.0.1]: https://github.com/parzival1l/docket/releases/tag/v0.0.1
