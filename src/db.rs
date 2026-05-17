@@ -186,14 +186,15 @@ pub struct NewTask<'a> {
     pub priority: i32,
     pub group_id: Option<i64>,
     pub kind: &'a str,
+    pub status: &'a str,
 }
 
 pub fn insert_task(conn: &Connection, t: NewTask) -> Result<i64> {
     let n = now();
     conn.execute(
         "INSERT INTO tasks (title, body, acceptance, deps, status, priority, group_id, kind, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, 'open', ?5, ?6, ?7, ?8, ?8)",
-        params![t.title, t.body, t.acceptance, t.deps_json, t.priority, t.group_id, t.kind, n],
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+        params![t.title, t.body, t.acceptance, t.deps_json, t.status, t.priority, t.group_id, t.kind, n],
     )?;
     Ok(conn.last_insert_rowid())
 }
@@ -399,6 +400,7 @@ mod tests {
                 priority: 2,
                 group_id: None,
                 kind: "feature",
+                status: "open",
             },
         )
         .unwrap()
@@ -417,6 +419,7 @@ mod tests {
                 priority: 1,
                 group_id: None,
                 kind: "feature",
+                status: "open",
             },
         )
         .unwrap();

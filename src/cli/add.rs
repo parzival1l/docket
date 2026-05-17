@@ -11,6 +11,7 @@ pub fn run(
     priority: Option<i32>,
     group: Option<String>,
     kind: Option<String>,
+    backlog: bool,
 ) -> Result<()> {
     let kind = kind.unwrap_or_else(|| "feature".to_string());
     validate_kind(&kind)?;
@@ -21,6 +22,7 @@ pub fn run(
     };
     let deps_json = parse_deps(deps)?;
     let priority = priority.unwrap_or(2);
+    let status = if backlog { "backlog" } else { "open" };
     let id = db::insert_task(
         &conn,
         NewTask {
@@ -31,6 +33,7 @@ pub fn run(
             priority,
             group_id,
             kind: &kind,
+            status,
         },
     )?;
     println!("{} added", fmt_id(id));

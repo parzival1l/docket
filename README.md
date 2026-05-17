@@ -125,12 +125,14 @@ docket ready                              # T-2 surfaces
 | Verb | Purpose |
 |------|---------|
 | `docket init` | Create `.docket/db.sqlite` in current repo, append `.docket/` to `.gitignore` |
-| `docket add <title>` | Create a task; flags: `--body --acceptance --deps --priority --group` |
-| `docket ls` | List tasks; flags: `--status --group --json` |
+| `docket add <title>` | Create a task; flags: `--body --acceptance --deps --priority --group --kind --backlog` |
+| `docket ls` | List tasks (hides `backlog`); flags: `--status --group --kind --json` |
 | `docket show T-N` | Full task with body, acceptance, deps with resolved states |
-| `docket ready` | Tasks with `status=open` and all deps `done` |
-| `docket blocked` | Inverse of ready: tasks with unmet deps (debug view) |
-| `docket status T-N <state>` | Set status (`open`, `in_progress`, `done`, or any string) |
+| `docket ready` | Tasks with `status=open` and all deps `done` (ignores `backlog`) |
+| `docket blocked` | Inverse of ready: tasks with unmet deps (debug view; ignores `backlog`) |
+| `docket backlog` | List tasks parked in the backlog; flags: `--group --kind --json` |
+| `docket promote T-N` | Move a task from `backlog` to `open` |
+| `docket status T-N <state>` | Set status (`backlog`, `open`, `in_progress`, `done`, or any string) |
 | `docket done T-N` | Convenience for `docket status T-N done` |
 | `docket rm T-N` | Delete a task |
 | `docket prompt <name>` | Print an embedded prompt (`tdd-pursuit`, `create-task`, `commit`, `pr`) |
@@ -152,7 +154,7 @@ groups(id, name UNIQUE, branch_name, description, state, created_at)
 
 - `id` is integer-incrementing; rendered as `T-N`.
 - `deps` is a JSON array of integer task IDs (e.g. `[3, 5]`); the only link type is `blocks`.
-- `status` is `open | in_progress | done` by convention. `blocked` is *computed* from unmet deps, never stored.
+- `status` follows the lifecycle `backlog → open → in_progress → done` by convention. `backlog` is a parked state — invisible to default views (`ls`, `ready`, `blocked`) and only reachable/exitable via explicit user action (`docket add --backlog`, `docket promote`, or `docket status`). `blocked` is *computed* from unmet deps, never stored.
 - `priority` is 0..4, default 2 (lower = more urgent, beads convention).
 - `group_id` is nullable — tasks don't have to be in a group.
 

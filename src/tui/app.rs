@@ -317,6 +317,7 @@ impl App {
                     priority: validated.priority,
                     group_id,
                     kind: &validated.kind,
+                    status: "open",
                 },
             ),
             EditMode::Edit { id } => crate::db::update_task(
@@ -579,6 +580,7 @@ mod tests {
                     priority: *priority,
                     group_id: None,
                     kind: "feature",
+                    status: "open",
                 },
             )
             .unwrap();
@@ -1525,6 +1527,7 @@ mod tests {
                 priority: 2,
                 group_id: None,
                 kind,
+                status: "open",
             },
         )
         .unwrap();

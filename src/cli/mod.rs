@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 use crate::model::{fmt_id, kind_short, Task};
 
 pub mod add;
+pub mod backlog;
 pub mod blocked;
 pub mod group;
 pub mod init;
@@ -64,6 +65,9 @@ pub enum Command {
         /// One of: bug, feature, chore, docs, spike (default: feature)
         #[arg(long, value_parser = ["bug", "feature", "chore", "docs", "spike"])]
         kind: Option<String>,
+        /// Park the task in the backlog (status = 'backlog') instead of `open`
+        #[arg(long)]
+        backlog: bool,
     },
     /// List tasks
     Ls {
@@ -97,6 +101,18 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// List tasks parked in the backlog (status = 'backlog')
+    Backlog {
+        #[arg(long)]
+        group: Option<String>,
+        /// Filter by kind: bug, feature, chore, docs, spike
+        #[arg(long, value_parser = ["bug", "feature", "chore", "docs", "spike"])]
+        kind: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Promote a backlog task to `open`
+    Promote { id: String },
     /// Set status (open | in_progress | done — or any string)
     Status { id: String, state: String },
     /// Mark task done
@@ -184,7 +200,8 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             priority,
             group,
             kind,
-        } => add::run(title, body, acceptance, deps, priority, group, kind),
+            backlog,
+        } => add::run(title, body, acceptance, deps, priority, group, kind, backlog),
         Command::Ls {
             status,
             group,
@@ -194,6 +211,8 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         Command::Show { id, json } => show::run(id, json),
         Command::Ready { group, json } => ready::run(group, json),
         Command::Blocked { group, json } => blocked::run(group, json),
+        Command::Backlog { group, kind, json } => backlog::run(group, kind, json),
+        Command::Promote { id } => status::promote(id),
         Command::Status { id, state } => status::run(id, state),
         Command::Done { id } => status::done(id),
         Command::Rm { id } => rm::run(id),

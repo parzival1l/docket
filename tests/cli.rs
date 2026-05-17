@@ -852,3 +852,240 @@ fn two_repos_in_one_test_are_isolated() {
         r2.path().join(".docket/db.sqlite")
     );
 }
+
+// ---------- backlog (T-10) ----------
+
+#[test]
+fn status_command_can_set_backlog_state() {
+    let repo = Repo::new();
+    let id = repo.add_simple("started open");
+    assert!(repo.run(&["status", &id, "backlog"]).status.success());
+    assert_eq!(repo.show_json(&id)["status"], "backlog");
+}
+
+#[test]
+fn promote_flips_backlog_to_open_and_bumps_updated_at() {
+    let repo = Repo::new();
+    let bl_out = repo.run(&["add", "later idea", "--backlog"]);
+    assert!(bl_out.status.success());
+    let id = stdout_of(&bl_out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+    let before = repo.show_json(&id);
+    assert_eq!(before["status"], "backlog");
+    // Sleep so updated_at strictly increases (timestamps are RFC3339).
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+
+    let out = repo.run(&["promote", &id]);
+    assert!(out.status.success(), "promote failed: {}", stderr_of(&out));
+
+    let after = repo.show_json(&id);
+    assert_eq!(after["status"], "open");
+    assert_ne!(
+        after["updated_at"], before["updated_at"],
+        "updated_at should change after promote"
+    );
+}
+
+#[test]
+fn promote_on_non_backlog_task_errors() {
+    let repo = Repo::new();
+    let id = repo.add_simple("already open");
+    let out = repo.run(&["promote", &id]);
+    assert!(
+        !out.status.success(),
+        "promote on non-backlog task should error; got success"
+    );
+    let err = stderr_of(&out).to_lowercase();
+    assert!(
+        err.contains("backlog"),
+        "error should mention backlog; got:\n{}",
+        err
+    );
+    // status must be unchanged
+    assert_eq!(repo.show_json(&id)["status"], "open");
+}
+
+#[test]
+fn promote_missing_id_errors() {
+    let repo = Repo::new();
+    let out = repo.run(&["promote", "T-999"]);
+    assert!(!out.status.success(), "promote on missing id should error");
+}
+
+#[test]
+fn backlog_command_group_filter_excludes_other_groups() {
+    let repo = Repo::new();
+    let in_out = repo.run(&[
+        "add",
+        "in g",
+        "--backlog",
+        "--group",
+        "g",
+    ]);
+    assert!(in_out.status.success());
+    let in_id = stdout_of(&in_out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+    let out_out = repo.run(&["add", "no group", "--backlog"]);
+    assert!(out_out.status.success());
+    let out_id = stdout_of(&out_out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+
+    let out = repo.run(&["backlog", "--group", "g"]);
+    let s = stdout_of(&out);
+    assert!(s.contains(&in_id));
+    assert!(!s.contains(&out_id));
+}
+
+#[test]
+fn backlog_command_json_emits_valid_array() {
+    let repo = Repo::new();
+    repo.run(&["add", "a", "--backlog"]);
+    repo.run(&["add", "b", "--backlog"]);
+    repo.add_simple("open one");
+    let out = repo.run(&["backlog", "--json"]);
+    assert!(out.status.success(), "backlog --json failed: {}", stderr_of(&out));
+    let v: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("backlog --json should emit JSON");
+    let arr = v.as_array().expect("backlog --json should emit array");
+    assert_eq!(arr.len(), 2, "should only include the 2 backlog tasks; got: {:?}", arr);
+}
+
+#[test]
+fn backlog_command_lists_backlog_tasks_and_excludes_others() {
+    let repo = Repo::new();
+    let open_id = repo.add_simple("active task");
+    let bl_out = repo.run(&["add", "later idea", "--backlog"]);
+    assert!(bl_out.status.success());
+    let bl_id = stdout_of(&bl_out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+
+    let out = repo.run(&["backlog"]);
+    assert!(out.status.success(), "backlog cmd failed: {}", stderr_of(&out));
+    let s = stdout_of(&out);
+    assert!(s.contains(&bl_id), "backlog task should appear; got:\n{}", s);
+    assert!(
+        !s.contains(&open_id),
+        "open task should NOT appear in backlog; got:\n{}",
+        s
+    );
+}
+
+#[test]
+fn ready_does_not_show_backlog_tasks() {
+    let repo = Repo::new();
+    let bl_out = repo.run(&["add", "later idea", "--backlog"]);
+    assert!(bl_out.status.success());
+    let bl_id = stdout_of(&bl_out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+
+    let out = repo.run(&["ready"]);
+    assert!(out.status.success());
+    let s = stdout_of(&out);
+    assert!(
+        !s.contains(&bl_id),
+        "backlog task should NOT appear in `ready`; got:\n{}",
+        s
+    );
+}
+
+#[test]
+fn blocked_does_not_show_backlog_tasks() {
+    let repo = Repo::new();
+    let dep = repo.add_simple("dep");
+    let bl_out = repo.run(&[
+        "add",
+        "later dependent",
+        "--backlog",
+        "--deps",
+        &dep,
+    ]);
+    assert!(bl_out.status.success());
+    let bl_id = stdout_of(&bl_out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+
+    let out = repo.run(&["blocked"]);
+    assert!(out.status.success());
+    let s = stdout_of(&out);
+    assert!(
+        !s.contains(&bl_id),
+        "backlog task should NOT appear in `blocked`; got:\n{}",
+        s
+    );
+}
+
+#[test]
+fn ls_status_backlog_shows_backlog_tasks() {
+    let repo = Repo::new();
+    let bl_out = repo.run(&["add", "later idea", "--backlog"]);
+    assert!(bl_out.status.success());
+    let bl_id = stdout_of(&bl_out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+    let open_id = repo.add_simple("active");
+
+    let out = repo.run(&["ls", "--status", "backlog"]);
+    assert!(out.status.success());
+    let s = stdout_of(&out);
+    assert!(s.contains(&bl_id), "backlog id should appear with --status backlog; got:\n{}", s);
+    assert!(!s.contains(&open_id), "open task should be filtered out; got:\n{}", s);
+}
+
+#[test]
+fn ls_default_hides_backlog_tasks() {
+    let repo = Repo::new();
+    let open_id = repo.add_simple("active task");
+    let bl_out = repo.run(&["add", "later idea", "--backlog"]);
+    assert!(bl_out.status.success());
+    let bl_id = stdout_of(&bl_out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+
+    let out = repo.run(&["ls"]);
+    let s = stdout_of(&out);
+    assert!(s.contains(&open_id), "open task should be listed; got:\n{}", s);
+    assert!(
+        !s.contains(&bl_id),
+        "backlog task should be hidden from default ls; got:\n{}",
+        s
+    );
+}
+
+#[test]
+fn add_with_backlog_creates_task_in_backlog_status() {
+    let repo = Repo::new();
+    let out = repo.run(&["add", "later idea", "--backlog"]);
+    assert!(
+        out.status.success(),
+        "add --backlog failed: {}",
+        stderr_of(&out)
+    );
+    let id = stdout_of(&out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+    let j = repo.show_json(&id);
+    assert_eq!(j["status"], "backlog");
+}
