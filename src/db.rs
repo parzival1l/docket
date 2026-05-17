@@ -195,6 +195,42 @@ pub struct TaskUpdate<'a> {
     pub group_id: Option<i64>,
 }
 
+pub struct TaskFieldUpdate<'a> {
+    pub title: Option<&'a str>,
+    pub body: Option<&'a str>,
+    pub acceptance: Option<&'a str>,
+    pub deps_json: Option<&'a str>,
+    pub priority: Option<i32>,
+    pub group_id: Option<i64>,
+}
+
+/// Updates only the fields whose corresponding `Option` is `Some`. Always
+/// bumps `updated_at`. Returns the number of rows changed (0 if id missing).
+pub fn update_task_fields(conn: &Connection, id: i64, t: TaskFieldUpdate) -> Result<usize> {
+    let n = conn.execute(
+        "UPDATE tasks SET
+            title      = COALESCE(?1, title),
+            body       = COALESCE(?2, body),
+            acceptance = COALESCE(?3, acceptance),
+            deps       = COALESCE(?4, deps),
+            priority   = COALESCE(?5, priority),
+            group_id   = COALESCE(?6, group_id),
+            updated_at = ?7
+         WHERE id = ?8",
+        params![
+            t.title,
+            t.body,
+            t.acceptance,
+            t.deps_json,
+            t.priority,
+            t.group_id,
+            now(),
+            id
+        ],
+    )?;
+    Ok(n)
+}
+
 /// Updates all editable fields on a task. `status` is intentionally not
 /// touched here — use `set_status` for that.
 #[allow(dead_code)] // used by TUI (lands in PR-3)

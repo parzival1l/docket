@@ -15,6 +15,7 @@ pub mod show;
 pub mod start;
 pub mod status;
 pub mod tui;
+pub mod update;
 
 pub(crate) fn print_task_row(t: &Task) {
     let group_str = t
@@ -95,6 +96,25 @@ pub enum Command {
     Done { id: String },
     /// Remove a task
     Rm { id: String },
+    /// Update fields on an existing task (at least one field flag required)
+    Update {
+        id: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        body: Option<String>,
+        #[arg(long)]
+        acceptance: Option<String>,
+        /// Comma- or space-separated task IDs (e.g. "T-3,T-5" or "3 5"); replaces existing deps
+        #[arg(long)]
+        deps: Option<String>,
+        /// 0..4, lower = higher priority
+        #[arg(long)]
+        priority: Option<i32>,
+        /// Group name; created lazily if it doesn't exist
+        #[arg(long)]
+        group: Option<String>,
+    },
     /// Print a prompt template to stdout
     Prompt {
         /// One of: tdd-pursuit, create-task, commit, pr
@@ -159,6 +179,15 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         Command::Status { id, state } => status::run(id, state),
         Command::Done { id } => status::done(id),
         Command::Rm { id } => rm::run(id),
+        Command::Update {
+            id,
+            title,
+            body,
+            acceptance,
+            deps,
+            priority,
+            group,
+        } => update::run(id, title, body, acceptance, deps, priority, group),
         Command::Prompt { name } => prompt::run(name),
         Command::Start { id, tmux } => start::run(id, tmux),
         Command::Group { action } => match action {
