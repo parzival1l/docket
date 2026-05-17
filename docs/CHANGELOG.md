@@ -45,7 +45,7 @@ The handoff release. Closes the loop between picking a task and handing it to an
 
 ### Release automation
 
-- `release.toml` — `cargo-release` configuration that bumps `Cargo.toml` + `Cargo.lock`, splits `## [Unreleased]` in CHANGELOG into a new dated version section, and commits as `release: <version>` without tagging or pushing.
+- `release.toml` — `cargo-release` configuration that bumps `Cargo.toml` + `Cargo.lock`, splits the `Unreleased` section in CHANGELOG into a new dated version section, and commits as `release: <version>` without tagging or pushing.
 - `.github/workflows/auto-tag.yml` — fires on push to `main`, reads the version from `Cargo.toml`, creates and pushes the matching `v<version>` tag if absent, then dispatches `release.yml`. Cuts the maintainer flow to two commands: `cargo release X.Y.Z --execute` then `git push origin main`.
 
 ## [0.0.1] - 2026-05-09
