@@ -9,7 +9,7 @@
       "name": "docket",
       "source": "./plugin",
       "description": "Agent-shaped task tracker for coding sessions. Capture work from design discussions as tasks with testable acceptance, surface the next dependency-ready task, then drive each one through a strict TDD execution loop — every task carries its own definition of done.",
-      "version": "0.0.1",
+      "version": "0.0.4",
       "homepage": "https://github.com/parzival1l/docket",
       "repository": "https://github.com/parzival1l/docket",
       "license": "MIT",

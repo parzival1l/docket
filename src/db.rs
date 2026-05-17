@@ -31,6 +31,14 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_group  ON tasks(group_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_kind   ON tasks(kind);
+
+CREATE TABLE IF NOT EXISTS agent_sessions (
+    session_id  TEXT PRIMARY KEY,
+    task_id     INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    linked_at   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_sessions_task ON agent_sessions(task_id);
 "#;
 
 pub fn find_repo_root(start: &Path) -> Option<PathBuf> {
@@ -80,6 +88,14 @@ pub fn apply_migrations(conn: &Connection) -> Result<()> {
              CREATE INDEX IF NOT EXISTS idx_tasks_kind ON tasks(kind);",
         )?;
     }
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS agent_sessions (
+            session_id  TEXT PRIMARY KEY,
+            task_id     INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            linked_at   TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_agent_sessions_task ON agent_sessions(task_id);",
+    )?;
     Ok(())
 }
 
@@ -98,7 +114,7 @@ pub fn load_all_tasks(conn: &Connection) -> Result<Vec<Task>> {
          FROM tasks t LEFT JOIN groups g ON t.group_id = g.id
          ORDER BY t.priority, t.id",
     )?;
-    let tasks = stmt
+    let mut tasks: Vec<Task> = stmt
         .query_map([], |r| {
             let deps_raw: Option<String> = r.get(4)?;
             Ok(Task {
@@ -113,10 +129,69 @@ pub fn load_all_tasks(conn: &Connection) -> Result<Vec<Task>> {
                 kind: r.get(8)?,
                 created_at: r.get(9)?,
                 updated_at: r.get(10)?,
+                agent_sessions: vec![],
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
+
+    let mut sess_stmt = conn.prepare(
+        "SELECT task_id, session_id FROM agent_sessions ORDER BY linked_at, session_id",
+    )?;
+    let rows = sess_stmt.query_map([], |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+    })?;
+    for row in rows {
+        let (task_id, sess) = row?;
+        if let Some(t) = tasks.iter_mut().find(|t| t.id == task_id) {
+            t.agent_sessions.push(sess);
+        }
+    }
     Ok(tasks)
+}
+
+/// Link `session_id` to `task_id`. If `session_id` was already linked to a
+/// different task, this MOVES it — no duplicate rows ever exist for a given
+/// session id.
+pub fn link_session(conn: &Connection, task_id: i64, session_id: &str) -> Result<()> {
+    let exists: bool = conn
+        .query_row(
+            "SELECT 1 FROM tasks WHERE id = ?1",
+            params![task_id],
+            |_| Ok(true),
+        )
+        .optional()?
+        .unwrap_or(false);
+    if !exists {
+        return Err(anyhow!("task id {} not found", task_id));
+    }
+    conn.execute(
+        "INSERT INTO agent_sessions (session_id, task_id, linked_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(session_id) DO UPDATE SET task_id = excluded.task_id, linked_at = excluded.linked_at",
+        params![session_id, task_id, now()],
+    )?;
+    Ok(())
+}
+
+/// Remove the session link entirely. Returns rows deleted (0 if not linked).
+pub fn unlink_session(conn: &Connection, session_id: &str) -> Result<usize> {
+    let n = conn.execute(
+        "DELETE FROM agent_sessions WHERE session_id = ?1",
+        params![session_id],
+    )?;
+    Ok(n)
+}
+
+/// Resolve a session id back to its task id, if any.
+pub fn session_task(conn: &Connection, session_id: &str) -> Result<Option<i64>> {
+    let t: Option<i64> = conn
+        .query_row(
+            "SELECT task_id FROM agent_sessions WHERE session_id = ?1",
+            params![session_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(t)
 }
 
 pub fn load_group_by_name(conn: &Connection, name: &str) -> Result<Option<Group>> {

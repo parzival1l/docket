@@ -12,6 +12,7 @@ pub mod ls;
 pub mod prompt;
 pub mod ready;
 pub mod rm;
+pub mod session;
 pub mod show;
 pub mod start;
 pub mod status;
@@ -168,8 +169,37 @@ pub enum Command {
         #[command(subcommand)]
         action: GroupCommand,
     },
+    /// Agent session link operations
+    Session {
+        #[command(subcommand)]
+        action: SessionCommand,
+    },
     /// Open the interactive TUI
     Tui,
+}
+
+#[derive(Subcommand)]
+pub enum SessionCommand {
+    /// Link a session id to a task. Moves the link if the session was
+    /// already attached to a different task (no duplicates).
+    Link {
+        /// Task id (e.g. T-7 or 7)
+        task_id: String,
+        /// Session id (opaque string)
+        session_id: String,
+    },
+    /// Remove a session link.
+    Unlink {
+        /// Session id (opaque string)
+        session_id: String,
+    },
+    /// Show which task a session is linked to.
+    Show {
+        /// Session id
+        session_id: String,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -247,6 +277,14 @@ pub fn dispatch(cli: Cli) -> Result<()> {
                 start::TmuxDelivery::Off
             },
         ),
+        Command::Session { action } => match action {
+            SessionCommand::Link {
+                task_id,
+                session_id,
+            } => session::link(task_id, session_id),
+            SessionCommand::Unlink { session_id } => session::unlink(session_id),
+            SessionCommand::Show { session_id, json } => session::show(session_id, json),
+        },
         Command::Group { action } => match action {
             GroupCommand::New {
                 name,

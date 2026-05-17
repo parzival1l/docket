@@ -605,6 +605,7 @@ mod tests {
             kind: "feature".into(),
             created_at: "t".into(),
             updated_at: "t".into(),
+            agent_sessions: vec![],
         };
         let s = EditState::for_edit(&task);
         assert_eq!(s.mode, EditMode::Edit { id: 7 });

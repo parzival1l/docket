@@ -57,6 +57,12 @@ pub fn render(
                     .collect();
                 out.push(Line::from(format!("deps: {}", parts.join(", "))));
             }
+            if !t.agent_sessions.is_empty() {
+                out.push(Line::from(format!(
+                    "sessions: {}",
+                    t.agent_sessions.join(", ")
+                )));
+            }
             out.push(Line::from(""));
             if let Some(b) = &t.body {
                 out.push(Line::from(Span::styled(

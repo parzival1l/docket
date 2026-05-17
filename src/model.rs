@@ -15,6 +15,8 @@ pub struct Task {
     pub kind: String,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub agent_sessions: Vec<String>,
 }
 
 /// The closed vocabulary of task kinds. Keeps filtering/UX simple.

@@ -35,6 +35,7 @@ mod tests {
             kind: "feature".into(),
             created_at: "t".into(),
             updated_at: "t".into(),
+            agent_sessions: vec![],
         }
     }
 

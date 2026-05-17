@@ -3,7 +3,7 @@ use chrono::Utc;
 use rusqlite::{params, Connection};
 use std::fs;
 
-use crate::db::{load_all_tasks, open_db};
+use crate::db::{link_session, load_all_tasks, open_db};
 use crate::model::{fmt_id, now, parse_id};
 use crate::prompts::assemble_prompt;
 
@@ -39,7 +39,8 @@ pub fn run(id: String, delivery: TmuxDelivery) -> Result<()> {
         }
         TmuxDelivery::Auto | TmuxDelivery::ForceSpawn => {
             let force_spawn = matches!(delivery, TmuxDelivery::ForceSpawn);
-            deliver_via_tmux_session(t.id, &prompt, force_spawn)?;
+            let session_name = deliver_via_tmux_session(t.id, &prompt, force_spawn)?;
+            link_session(&conn, t.id, &session_name)?;
         }
     }
 
@@ -55,7 +56,7 @@ fn mark_in_progress(conn: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
-fn deliver_via_tmux_session(id: i64, prompt: &str, force_spawn: bool) -> Result<()> {
+fn deliver_via_tmux_session(id: i64, prompt: &str, force_spawn: bool) -> Result<String> {
     let ts = Utc::now().timestamp_nanos_opt().unwrap_or(0);
     let prompt_path = std::env::temp_dir().join(format!("docket-{}-{}.md", fmt_id(id), ts));
     fs::write(&prompt_path, prompt)
@@ -116,7 +117,7 @@ fn deliver_via_tmux_session(id: i64, prompt: &str, force_spawn: bool) -> Result<
         spawn_terminal_with_attach(&session_name)?;
     }
 
-    Ok(())
+    Ok(session_name)
 }
 
 fn spawn_terminal_with_attach(session_name: &str) -> Result<()> {

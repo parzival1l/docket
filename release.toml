@@ -15,4 +15,8 @@ pre-release-replacements = [
   { file = "docs/CHANGELOG.md", search = "## \\[Unreleased\\]", replace = "## [Unreleased]\n\n## [{{version}}] - {{date}}", exactly = 1 },
   # Bump the [Unreleased] compare link and add a release link for the new version
   { file = "docs/CHANGELOG.md", search = "\\[Unreleased\\]: https://github\\.com/parzival1l/docket/compare/v[0-9.]+\\.\\.\\.HEAD", replace = "[Unreleased]: https://github.com/parzival1l/docket/compare/v{{version}}...HEAD\n[{{version}}]: https://github.com/parzival1l/docket/releases/tag/v{{version}}", exactly = 1 },
+  # Keep plugin metadata version in lockstep with the crate version so
+  # `/plugin marketplace update` sees a bump and re-fetches description/commands.
+  { file = "plugin/.claude-plugin/plugin.json", search = "\"version\": \"[0-9.]+\"", replace = "\"version\": \"{{version}}\"", exactly = 1 },
+  { file = ".claude-plugin/marketplace.json", search = "\"version\": \"[0-9.]+\"", replace = "\"version\": \"{{version}}\"", exactly = 1 },
 ]

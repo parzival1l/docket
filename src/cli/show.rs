@@ -36,6 +36,9 @@ pub fn run(id: String, json: bool) -> Result<()> {
         if !dep_states.is_empty() {
             println!("deps:  {}", dep_states.join(", "));
         }
+        if !t.agent_sessions.is_empty() {
+            println!("sessions: {}", t.agent_sessions.join(", "));
+        }
         println!("created: {}", t.created_at);
         if t.updated_at != t.created_at {
             println!("updated: {}", t.updated_at);
