@@ -10,6 +10,8 @@ GitHub Release body for the matching tag — keep entries written for that audie
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-05-17
+
 The TUI release. Lands an interactive `docket tui` for navigating, mutating, and starting tasks without leaving the keyboard, plus a `docket update` subcommand for editing tasks in place. The CLI core was extracted into modules along the way (`cli/`, `db/`, `model/`, `prompts/`, `tui/`) so the TUI and CLI share a single data layer.
 
 ### Added
@@ -66,6 +68,7 @@ Initial release. v1 CLI shell with embedded prompts and bundled SQLite store.
 
 - Versioning starts at `0.0.x` deliberately. Every shipped item bumps the patch (0.0.2, 0.0.3, …). The cut to `0.1.0` is **maintainer judgment, not a feature checklist** — it happens when the loop feels solid for daily use. `docket start` landing is the most likely trigger but is not by itself sufficient.
 
-[Unreleased]: https://github.com/parzival1l/docket/compare/v0.0.2...HEAD
+[Unreleased]: https://github.com/parzival1l/docket/compare/v0.0.3...HEAD
+[0.0.3]: https://github.com/parzival1l/docket/releases/tag/v0.0.3
 [0.0.2]: https://github.com/parzival1l/docket/releases/tag/v0.0.2
 [0.0.1]: https://github.com/parzival1l/docket/releases/tag/v0.0.1
