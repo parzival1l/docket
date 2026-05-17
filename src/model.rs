@@ -32,6 +32,27 @@ pub fn validate_kind(k: &str) -> Result<()> {
     }
 }
 
+/// 3-letter shorthand for dense list views. Falls back to the first 3 chars
+/// for kinds we don't know about (forward-compat).
+pub fn kind_short(k: &str) -> &str {
+    match k {
+        "bug" => "bug",
+        "feature" => "fea",
+        "chore" => "cho",
+        "docs" => "doc",
+        "spike" => "spi",
+        other => {
+            let end = other
+                .char_indices()
+                .nth(3)
+                .map(|(i, _)| i)
+                .unwrap_or(other.len());
+            &other[..end]
+        }
+    }
+}
+
+
 #[derive(Serialize, Clone)]
 pub struct Group {
     pub id: i64,

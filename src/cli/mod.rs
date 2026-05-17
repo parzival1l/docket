@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-use crate::model::{fmt_id, Task};
+use crate::model::{fmt_id, kind_short, Task};
 
 pub mod add;
 pub mod blocked;
@@ -24,10 +24,10 @@ pub(crate) fn print_task_row(t: &Task) {
         .map(|g| format!(" [{}]", g))
         .unwrap_or_default();
     println!(
-        "{:<6} {:<12} {:<8} p{} {}{}",
+        "{:<6} {:<12} {:<4} p{} {}{}",
         fmt_id(t.id),
         t.status,
-        format!("[{}]", t.kind),
+        kind_short(&t.kind),
         t.priority,
         t.title,
         group_str

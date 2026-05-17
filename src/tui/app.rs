@@ -316,34 +316,23 @@ impl App {
                     deps_json: validated.deps_json.as_deref(),
                     priority: validated.priority,
                     group_id,
-                    kind: "feature",
+                    kind: &validated.kind,
                 },
             ),
-            EditMode::Edit { id } => {
-                // Preserve the existing kind — the edit form has no kind
-                // field yet, so a blind write would silently reset every
-                // task to `feature` on save.
-                let existing_kind = self
-                    .tasks
-                    .iter()
-                    .find(|t| t.id == id)
-                    .map(|t| t.kind.clone())
-                    .unwrap_or_else(|| "feature".to_string());
-                crate::db::update_task(
-                    &self.conn,
-                    id,
-                    crate::db::TaskUpdate {
-                        title: &validated.title,
-                        body: validated.body.as_deref(),
-                        acceptance: validated.acceptance.as_deref(),
-                        deps_json: validated.deps_json.as_deref(),
-                        priority: validated.priority,
-                        group_id,
-                        kind: &existing_kind,
-                    },
-                )
-                .map(|_| id)
-            }
+            EditMode::Edit { id } => crate::db::update_task(
+                &self.conn,
+                id,
+                crate::db::TaskUpdate {
+                    title: &validated.title,
+                    body: validated.body.as_deref(),
+                    acceptance: validated.acceptance.as_deref(),
+                    deps_json: validated.deps_json.as_deref(),
+                    priority: validated.priority,
+                    group_id,
+                    kind: &validated.kind,
+                },
+            )
+            .map(|_| id),
         };
 
         match result {
@@ -448,6 +437,11 @@ impl App {
             EditField::Priority => {
                 let _ = state.priority.handle_event(&event);
             }
+            EditField::Kind => match key.code {
+                KeyCode::Right | KeyCode::Char('l') => state.cycle_kind_forward(),
+                KeyCode::Left | KeyCode::Char('h') => state.cycle_kind_backward(),
+                _ => {}
+            },
             EditField::Group => {
                 let _ = state.group.handle_event(&event);
             }
@@ -1089,7 +1083,8 @@ mod tests {
     fn typing_into_body_textarea_inserts_text() {
         let mut app = mem_app();
         app.handle_key(key(KeyCode::Char('n')));
-        for _ in 0..4 {
+        // Tab order: Title → Priority → Kind → Group → Deps → Body.
+        for _ in 0..5 {
             app.handle_key(key(KeyCode::Tab));
         }
         for c in "hi".chars() {
@@ -1106,7 +1101,7 @@ mod tests {
     fn enter_in_body_textarea_inserts_newline() {
         let mut app = mem_app();
         app.handle_key(key(KeyCode::Char('n')));
-        for _ in 0..4 {
+        for _ in 0..5 {
             app.handle_key(key(KeyCode::Tab));
         }
         app.handle_key(key(KeyCode::Char('a')));
@@ -1409,8 +1404,12 @@ mod tests {
         for c in "child".chars() {
             app.handle_key(key(KeyCode::Char(c)));
         }
-        app.handle_key(key(KeyCode::Tab));
-        app.handle_key(key(KeyCode::Tab));
+        // Tab order: Title → Priority → Kind → Group → Deps.
+        // Step from Title to Group (3 tabs), enter the group name, then to
+        // Deps (1 tab).
+        for _ in 0..3 {
+            app.handle_key(key(KeyCode::Tab));
+        }
         for c in "v0.2".chars() {
             app.handle_key(key(KeyCode::Char(c)));
         }
@@ -1534,6 +1533,93 @@ mod tests {
     }
 
     #[test]
+    fn edit_modal_cycles_kind_with_arrow_keys_and_save_persists_it() {
+        let mut app = mem_app();
+        let id = seed_task_with_kind(&mut app, "alpha", "feature");
+
+        // Open the edit form on the seeded task.
+        app.handle_key(key(KeyCode::Char('e')));
+
+        // Tab from Title → Priority → Kind.
+        app.handle_key(key(KeyCode::Tab));
+        app.handle_key(key(KeyCode::Tab));
+
+        // Cycle Right once: feature (index 1 in KINDS) should move to chore.
+        app.handle_key(key(KeyCode::Right));
+
+        // Save.
+        app.handle_key(key_with(KeyCode::Char('s'), KeyModifiers::CONTROL));
+
+        assert_eq!(app.screen, Screen::Main);
+        let task = app.tasks.iter().find(|t| t.id == id).expect("task missing");
+        assert_eq!(
+            task.kind, "chore",
+            "Right arrow on Kind field should cycle feature → chore and save must persist it"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn dump_edit_modal_for_human_inspection() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut app = mem_app();
+        seed_task_with_kind(&mut app, "alpha", "feature");
+        app.handle_key(key(KeyCode::Char('e')));
+        // Focus the Kind row so the dropdown affordance is visible.
+        app.handle_key(key(KeyCode::Tab));
+        app.handle_key(key(KeyCode::Tab));
+
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let area = buf.area();
+        eprintln!("---- edit modal (Kind focused) ----");
+        for y in 0..area.height {
+            let mut row = String::new();
+            for x in 0..area.width {
+                row.push_str(buf[(x, y)].symbol());
+            }
+            eprintln!("{}", row);
+        }
+    }
+
+    #[test]
+    fn edit_modal_renders_kind_field_with_current_value() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut app = mem_app();
+        seed_task_with_kind(&mut app, "alpha", "chore");
+        app.handle_key(key(KeyCode::Char('e')));
+
+        let backend = TestBackend::new(120, 60);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let area = buf.area();
+        let mut rows: Vec<String> = Vec::new();
+        for y in 0..area.height {
+            let mut row = String::new();
+            for x in 0..area.width {
+                row.push_str(buf[(x, y)].symbol());
+            }
+            rows.push(row);
+        }
+        let dump = rows.join("\n");
+        assert!(
+            dump.contains("Kind"),
+            "edit modal should render a `Kind` label; got:\n{}",
+            dump
+        );
+        assert!(
+            dump.contains("chore"),
+            "edit modal should show the task's current kind `chore`; got:\n{}",
+            dump
+        );
+    }
+
+    #[test]
     fn editing_a_task_preserves_its_kind() {
         let mut app = mem_app();
         let id = seed_task_with_kind(&mut app, "the bug", "bug");
@@ -1551,35 +1637,61 @@ mod tests {
         );
     }
 
-    #[test]
-    fn task_list_renders_kind_inline() {
+    /// Render the full TUI and slice each row down to just the list pane
+    /// (its `Constraint::Length(40)` plus a tiny buffer for the border).
+    fn render_list_pane() -> impl Fn(&mut App) -> String {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        move |app: &mut App| {
+            let backend = TestBackend::new(120, 60);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal.draw(|f| app.render(f)).unwrap();
+            let buf = terminal.backend().buffer().clone();
+            let area = buf.area();
+            let mut rows: Vec<String> = Vec::new();
+            let list_width = 40u16.min(area.width);
+            for y in 0..area.height {
+                let mut row = String::new();
+                for x in 0..list_width {
+                    row.push_str(buf[(x, y)].symbol());
+                }
+                rows.push(row);
+            }
+            rows.join("\n")
+        }
+    }
+
+    #[test]
+    fn task_list_renders_kind_inline() {
         let mut app = mem_app();
         // Title intentionally free of any vocabulary word so a hit can only
         // come from the kind cell, not a title substring.
         seed_task_with_kind(&mut app, "alpha", "bug");
 
-        let backend = TestBackend::new(120, 60);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| app.render(f)).unwrap();
-        let buf = terminal.backend().buffer().clone();
-        // Walk row-by-row so we get a faithful 2-D dump (the underlying
-        // buffer is a single flat string).
-        let area = buf.area();
-        let mut lines: Vec<String> = Vec::new();
-        for y in 0..area.height {
-            let mut row = String::new();
-            for x in 0..area.width {
-                row.push_str(buf[(x, y)].symbol());
-            }
-            lines.push(row);
-        }
-        let dump = lines.join("\n");
+        let list = render_list_pane()(&mut app);
         assert!(
-            dump.contains("[bug]"),
-            "task list row should surface kind `[bug]`; got:\n{}",
-            dump
+            list.contains("bug") && !list.contains("[bug]"),
+            "task list row should surface kind shorthand `bug` without brackets; got:\n{}",
+            list
+        );
+    }
+
+    #[test]
+    fn task_list_renders_kind_as_three_letter_shorthand() {
+        let mut app = mem_app();
+        seed_task_with_kind(&mut app, "alpha", "feature");
+        seed_task_with_kind(&mut app, "beta", "chore");
+
+        let list = render_list_pane()(&mut app);
+        assert!(
+            list.contains("fea") && !list.contains("[feature]"),
+            "feature task should render as `fea` shorthand, no brackets; got:\n{}",
+            list
+        );
+        assert!(
+            list.contains("cho") && !list.contains("[chore]"),
+            "chore task should render as `cho` shorthand, no brackets; got:\n{}",
+            list
         );
     }
 

@@ -329,6 +329,42 @@ fn ls_kind_filter_excludes_other_kinds() {
 }
 
 #[test]
+fn ls_default_output_uses_kind_shorthand_without_brackets() {
+    let repo = Repo::new();
+    let feat_id = repo.add_simple("a feature task");
+    let bug_out = repo.run(&["add", "a bug task", "--kind", "bug"]);
+    assert!(bug_out.status.success());
+    let bug_id = stdout_of(&bug_out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+
+    let out = repo.run(&["ls"]);
+    let s = stdout_of(&out);
+
+    let feat_row = s
+        .lines()
+        .find(|l| l.contains(&feat_id))
+        .unwrap_or_else(|| panic!("no ls row for {}; got:\n{}", feat_id, s));
+    assert!(
+        feat_row.contains("fea") && !feat_row.contains("[feature]"),
+        "feature row should use `fea` shorthand without brackets; got:\n{}",
+        feat_row
+    );
+
+    let bug_row = s
+        .lines()
+        .find(|l| l.contains(&bug_id))
+        .unwrap_or_else(|| panic!("no ls row for {}; got:\n{}", bug_id, s));
+    assert!(
+        bug_row.contains("bug") && !bug_row.contains("[bug]"),
+        "bug row should use `bug` shorthand without brackets; got:\n{}",
+        bug_row
+    );
+}
+
+#[test]
 fn ls_default_output_surfaces_kind() {
     let repo = Repo::new();
     let bug_out = repo.run(&["add", "the bug", "--kind", "bug"]);
