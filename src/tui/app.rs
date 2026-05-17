@@ -316,21 +316,34 @@ impl App {
                     deps_json: validated.deps_json.as_deref(),
                     priority: validated.priority,
                     group_id,
+                    kind: "feature",
                 },
             ),
-            EditMode::Edit { id } => crate::db::update_task(
-                &self.conn,
-                id,
-                crate::db::TaskUpdate {
-                    title: &validated.title,
-                    body: validated.body.as_deref(),
-                    acceptance: validated.acceptance.as_deref(),
-                    deps_json: validated.deps_json.as_deref(),
-                    priority: validated.priority,
-                    group_id,
-                },
-            )
-            .map(|_| id),
+            EditMode::Edit { id } => {
+                // Preserve the existing kind — the edit form has no kind
+                // field yet, so a blind write would silently reset every
+                // task to `feature` on save.
+                let existing_kind = self
+                    .tasks
+                    .iter()
+                    .find(|t| t.id == id)
+                    .map(|t| t.kind.clone())
+                    .unwrap_or_else(|| "feature".to_string());
+                crate::db::update_task(
+                    &self.conn,
+                    id,
+                    crate::db::TaskUpdate {
+                        title: &validated.title,
+                        body: validated.body.as_deref(),
+                        acceptance: validated.acceptance.as_deref(),
+                        deps_json: validated.deps_json.as_deref(),
+                        priority: validated.priority,
+                        group_id,
+                        kind: &existing_kind,
+                    },
+                )
+                .map(|_| id)
+            }
         };
 
         match result {
@@ -571,6 +584,7 @@ mod tests {
                     deps_json: None,
                     priority: *priority,
                     group_id: None,
+                    kind: "feature",
                 },
             )
             .unwrap();
@@ -1497,5 +1511,99 @@ mod tests {
             .join("");
         assert!(s.contains("Filter title/body"));
         assert!(s.contains("hi"));
+    }
+
+    // ---------- kind handling ----------
+
+    fn seed_task_with_kind(app: &mut App, title: &str, kind: &str) -> i64 {
+        let id = insert_task(
+            &app.conn,
+            NewTask {
+                title,
+                body: None,
+                acceptance: None,
+                deps_json: None,
+                priority: 2,
+                group_id: None,
+                kind,
+            },
+        )
+        .unwrap();
+        app.reload().unwrap();
+        id
+    }
+
+    #[test]
+    fn editing_a_task_preserves_its_kind() {
+        let mut app = mem_app();
+        let id = seed_task_with_kind(&mut app, "the bug", "bug");
+
+        // Open the edit form; bump the title (form has to be dirty enough to
+        // save) but never touch kind.
+        app.handle_key(key(KeyCode::Char('e')));
+        app.handle_key(key(KeyCode::Char('!')));
+        app.handle_key(key_with(KeyCode::Char('s'), KeyModifiers::CONTROL));
+
+        let task = app.tasks.iter().find(|t| t.id == id).expect("task missing");
+        assert_eq!(
+            task.kind, "bug",
+            "TUI edit must preserve kind, not silently reset it to feature"
+        );
+    }
+
+    #[test]
+    fn task_list_renders_kind_inline() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut app = mem_app();
+        // Title intentionally free of any vocabulary word so a hit can only
+        // come from the kind cell, not a title substring.
+        seed_task_with_kind(&mut app, "alpha", "bug");
+
+        let backend = TestBackend::new(120, 60);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        // Walk row-by-row so we get a faithful 2-D dump (the underlying
+        // buffer is a single flat string).
+        let area = buf.area();
+        let mut lines: Vec<String> = Vec::new();
+        for y in 0..area.height {
+            let mut row = String::new();
+            for x in 0..area.width {
+                row.push_str(buf[(x, y)].symbol());
+            }
+            lines.push(row);
+        }
+        let dump = lines.join("\n");
+        assert!(
+            dump.contains("[bug]"),
+            "task list row should surface kind `[bug]`; got:\n{}",
+            dump
+        );
+    }
+
+    #[test]
+    fn task_detail_renders_kind() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut app = mem_app();
+        seed_task_with_kind(&mut app, "alpha", "chore");
+
+        let backend = TestBackend::new(120, 60);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let s: String = buf
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(
+            s.contains("chore"),
+            "detail pane should surface kind `chore`; got:\n{}",
+            s
+        );
     }
 }

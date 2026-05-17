@@ -24,9 +24,10 @@ pub(crate) fn print_task_row(t: &Task) {
         .map(|g| format!(" [{}]", g))
         .unwrap_or_default();
     println!(
-        "{:<6} {:<12} p{} {}{}",
+        "{:<6} {:<12} {:<8} p{} {}{}",
         fmt_id(t.id),
         t.status,
+        format!("[{}]", t.kind),
         t.priority,
         t.title,
         group_str
@@ -60,6 +61,9 @@ pub enum Command {
         /// Group name; created lazily if it doesn't exist
         #[arg(long)]
         group: Option<String>,
+        /// One of: bug, feature, chore, docs, spike (default: feature)
+        #[arg(long, value_parser = ["bug", "feature", "chore", "docs", "spike"])]
+        kind: Option<String>,
     },
     /// List tasks
     Ls {
@@ -67,6 +71,9 @@ pub enum Command {
         status: Option<String>,
         #[arg(long)]
         group: Option<String>,
+        /// Filter by kind: bug, feature, chore, docs, spike
+        #[arg(long, value_parser = ["bug", "feature", "chore", "docs", "spike"])]
+        kind: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -114,6 +121,9 @@ pub enum Command {
         /// Group name; created lazily if it doesn't exist
         #[arg(long)]
         group: Option<String>,
+        /// One of: bug, feature, chore, docs, spike
+        #[arg(long, value_parser = ["bug", "feature", "chore", "docs", "spike"])]
+        kind: Option<String>,
     },
     /// Print a prompt template to stdout
     Prompt {
@@ -173,8 +183,14 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             deps,
             priority,
             group,
-        } => add::run(title, body, acceptance, deps, priority, group),
-        Command::Ls { status, group, json } => ls::run(status, group, json),
+            kind,
+        } => add::run(title, body, acceptance, deps, priority, group, kind),
+        Command::Ls {
+            status,
+            group,
+            kind,
+            json,
+        } => ls::run(status, group, kind, json),
         Command::Show { id, json } => show::run(id, json),
         Command::Ready { group, json } => ready::run(group, json),
         Command::Blocked { group, json } => blocked::run(group, json),
@@ -189,7 +205,8 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             deps,
             priority,
             group,
-        } => update::run(id, title, body, acceptance, deps, priority, group),
+            kind,
+        } => update::run(id, title, body, acceptance, deps, priority, group, kind),
         Command::Prompt { name } => prompt::run(name),
         Command::Start { id, tmux } => start::run(
             id,

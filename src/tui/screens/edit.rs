@@ -515,6 +515,7 @@ mod tests {
             status: "open".into(),
             priority: 1,
             group: Some("v0.1".into()),
+            kind: "feature".into(),
             created_at: "t".into(),
             updated_at: "t".into(),
         };

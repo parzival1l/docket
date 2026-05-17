@@ -23,10 +23,11 @@ pub fn run(id: String, json: bool) -> Result<()> {
             })
             .collect();
         println!(
-            "{}  {}  [{}]  p{}",
+            "{}  {}  [{}]  [{}]  p{}",
             fmt_id(t.id),
             t.title,
             t.status,
+            t.kind,
             t.priority
         );
         if let Some(g) = &t.group {

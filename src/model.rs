@@ -12,8 +12,24 @@ pub struct Task {
     pub status: String,
     pub priority: i32,
     pub group: Option<String>,
+    pub kind: String,
     pub created_at: String,
     pub updated_at: String,
+}
+
+/// The closed vocabulary of task kinds. Keeps filtering/UX simple.
+pub const KINDS: &[&str] = &["bug", "feature", "chore", "docs", "spike"];
+
+pub fn validate_kind(k: &str) -> Result<()> {
+    if KINDS.iter().any(|valid| *valid == k) {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!(
+            "invalid kind `{}` — must be one of: {}",
+            k,
+            KINDS.join(", ")
+        ))
+    }
 }
 
 #[derive(Serialize, Clone)]

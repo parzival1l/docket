@@ -89,6 +89,7 @@ mod tests {
             status: status.into(),
             priority,
             group: None,
+            kind: "feature".into(),
             created_at: "t".into(),
             updated_at: "t".into(),
         }

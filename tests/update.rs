@@ -350,3 +350,41 @@ fn update_priority_changes_priority_and_bumps_updated_at_only() {
         "updated_at must be bumped"
     );
 }
+
+#[test]
+fn update_kind_changes_kind_field() {
+    let repo = TestRepo::new();
+    let id = repo.add("a feature");
+    // default kind is feature
+    assert_eq!(show_json(&repo, &id)["kind"], "feature");
+
+    let out = repo.run(&["update", &id, "--kind", "bug"]);
+    assert!(
+        out.status.success(),
+        "update --kind bug failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(show_json(&repo, &id)["kind"], "bug");
+}
+
+#[test]
+fn update_kind_rejects_unknown_value() {
+    let repo = TestRepo::new();
+    let id = repo.add("t");
+    let out = repo.run(&["update", &id, "--kind", "nonsense"]);
+    assert!(
+        !out.status.success(),
+        "update --kind nonsense should fail; got success"
+    );
+    let err = String::from_utf8_lossy(&out.stderr).to_lowercase();
+    for k in &["bug", "feature", "chore", "docs", "spike"] {
+        assert!(
+            err.contains(k),
+            "error message should list `{}`; got:\n{}",
+            k,
+            err
+        );
+    }
+    // kind must not have changed on rejection.
+    assert_eq!(show_json(&repo, &id)["kind"], "feature");
+}

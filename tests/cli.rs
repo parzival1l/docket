@@ -235,6 +235,144 @@ fn short_help_and_version_flags_still_work() {
     );
 }
 
+// ---------- add --kind ----------
+
+#[test]
+fn add_without_kind_defaults_to_feature() {
+    let repo = Repo::new();
+    let id = repo.add_simple("default kind");
+    let j = repo.show_json(&id);
+    assert_eq!(
+        j["kind"], "feature",
+        "tasks created without --kind should default to feature"
+    );
+}
+
+#[test]
+fn add_with_kind_bug_round_trips_through_show_json() {
+    let repo = Repo::new();
+    let out = repo.run(&["add", "a clap bug", "--kind", "bug"]);
+    assert!(
+        out.status.success(),
+        "add --kind bug failed: {}",
+        stderr_of(&out)
+    );
+    let id = stdout_of(&out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+    let j = repo.show_json(&id);
+    assert_eq!(j["kind"], "bug");
+}
+
+#[test]
+fn add_with_unknown_kind_errors_and_lists_vocabulary() {
+    let repo = Repo::new();
+    let out = repo.run(&["add", "broken", "--kind", "nonsense"]);
+    assert!(
+        !out.status.success(),
+        "add --kind nonsense should fail; got success"
+    );
+    let err = stderr_of(&out).to_lowercase();
+    for k in &["bug", "feature", "chore", "docs", "spike"] {
+        assert!(
+            err.contains(k),
+            "error message should list `{}`; got:\n{}",
+            k,
+            err
+        );
+    }
+}
+
+#[test]
+fn add_accepts_all_documented_kinds() {
+    let repo = Repo::new();
+    for k in &["bug", "feature", "chore", "docs", "spike"] {
+        let out = repo.run(&["add", &format!("a {}", k), "--kind", k]);
+        assert!(
+            out.status.success(),
+            "add --kind {} failed: {}",
+            k,
+            stderr_of(&out)
+        );
+        let id = stdout_of(&out)
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .to_string();
+        assert_eq!(repo.show_json(&id)["kind"], *k);
+    }
+}
+
+#[test]
+fn ls_kind_filter_excludes_other_kinds() {
+    let repo = Repo::new();
+    let bug_out = repo.run(&["add", "the bug", "--kind", "bug"]);
+    assert!(bug_out.status.success());
+    let bug_id = stdout_of(&bug_out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+    let feat_id = repo.add_simple("the feature");
+
+    let out = repo.run(&["ls", "--kind", "bug"]);
+    assert!(out.status.success(), "ls --kind bug failed: {}", stderr_of(&out));
+    let s = stdout_of(&out);
+    assert!(s.contains(&bug_id), "bug id should be listed; got:\n{}", s);
+    assert!(
+        !s.contains(&feat_id),
+        "feature id should be filtered out; got:\n{}",
+        s
+    );
+}
+
+#[test]
+fn ls_default_output_surfaces_kind() {
+    let repo = Repo::new();
+    let bug_out = repo.run(&["add", "the bug", "--kind", "bug"]);
+    assert!(bug_out.status.success());
+    let bug_id = stdout_of(&bug_out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+
+    let out = repo.run(&["ls"]);
+    let s = stdout_of(&out);
+    // The bug task's row must surface its kind so a scanner can see it.
+    let row = s
+        .lines()
+        .find(|l| l.contains(&bug_id))
+        .unwrap_or_else(|| panic!("no ls row for {}; got:\n{}", bug_id, s));
+    assert!(
+        row.contains("bug"),
+        "ls row for {} should mention kind `bug`; got:\n{}",
+        bug_id,
+        row
+    );
+}
+
+#[test]
+fn show_text_output_includes_kind() {
+    let repo = Repo::new();
+    let out = repo.run(&["add", "the bug", "--kind", "bug"]);
+    assert!(out.status.success());
+    let id = stdout_of(&out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+    let out = repo.run(&["show", &id]);
+    let s = stdout_of(&out);
+    assert!(
+        s.contains("bug"),
+        "show text output should mention kind `bug`; got:\n{}",
+        s
+    );
+}
+
 #[test]
 fn add_with_invalid_deps_string_errors() {
     let repo = Repo::new();

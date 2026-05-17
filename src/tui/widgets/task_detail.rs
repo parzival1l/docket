@@ -38,6 +38,8 @@ pub fn render(
             out.push(Line::from(vec![
                 Span::raw("["),
                 Span::raw(t.status.clone()),
+                Span::raw("]  ["),
+                Span::raw(t.kind.clone()),
                 Span::raw("]  p"),
                 Span::raw(t.priority.to_string()),
             ]));
