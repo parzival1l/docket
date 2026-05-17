@@ -39,7 +39,7 @@ pub(crate) fn print_task_row(t: &Task) {
 #[command(name = "docket", version, about = "Agent-shaped task tracker with TDD execution harness")]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 #[derive(Subcommand)]
@@ -190,7 +190,11 @@ pub enum GroupCommand {
 }
 
 pub fn dispatch(cli: Cli) -> Result<()> {
-    match cli.command {
+    let command = match cli.command {
+        Some(c) => c,
+        None => return tui::run(),
+    };
+    match command {
         Command::Init => init::run(),
         Command::Add {
             title,

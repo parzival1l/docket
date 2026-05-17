@@ -213,6 +213,41 @@ fn update_body_and_acceptance_accept_values_starting_with_hyphen() {
     assert_eq!(j["acceptance"], accept);
 }
 
+// ---------- bare invocation (T-16) ----------
+
+#[test]
+fn bare_docket_does_not_print_help_text() {
+    // Bare `docket` should launch the TUI, not print help. In a non-tty test
+    // environment the TUI cannot fully initialize, but the key observable is
+    // that clap's help dump no longer appears on either stream.
+    let repo = Repo::new();
+    let out = repo.run(&[]);
+    let combined = format!("{}{}", stdout_of(&out), stderr_of(&out));
+    assert!(
+        !combined.contains("Usage: docket <COMMAND>"),
+        "bare `docket` should not print clap help text; got:\n{}",
+        combined
+    );
+    assert!(
+        !combined.contains("Print this message or the help of the given subcommand(s)"),
+        "bare `docket` should not print clap's help listing; got:\n{}",
+        combined
+    );
+}
+
+#[test]
+fn long_help_flag_still_prints_help() {
+    let repo = Repo::new();
+    let out = repo.run(&["--help"]);
+    assert!(out.status.success(), "--help should succeed");
+    let s = stdout_of(&out);
+    assert!(
+        s.to_lowercase().contains("usage"),
+        "--help should print help; got:\n{}",
+        s
+    );
+}
+
 #[test]
 fn short_help_and_version_flags_still_work() {
     let repo = Repo::new();
