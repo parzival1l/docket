@@ -316,6 +316,8 @@ impl App {
                     deps_json: validated.deps_json.as_deref(),
                     priority: validated.priority,
                     group_id,
+                    kind: &validated.kind,
+                    status: "open",
                 },
             ),
             EditMode::Edit { id } => crate::db::update_task(
@@ -328,6 +330,7 @@ impl App {
                     deps_json: validated.deps_json.as_deref(),
                     priority: validated.priority,
                     group_id,
+                    kind: &validated.kind,
                 },
             )
             .map(|_| id),
@@ -435,6 +438,11 @@ impl App {
             EditField::Priority => {
                 let _ = state.priority.handle_event(&event);
             }
+            EditField::Kind => match key.code {
+                KeyCode::Right | KeyCode::Char('l') => state.cycle_kind_forward(),
+                KeyCode::Left | KeyCode::Char('h') => state.cycle_kind_backward(),
+                _ => {}
+            },
             EditField::Group => {
                 let _ = state.group.handle_event(&event);
             }
@@ -571,6 +579,8 @@ mod tests {
                     deps_json: None,
                     priority: *priority,
                     group_id: None,
+                    kind: "feature",
+                    status: "open",
                 },
             )
             .unwrap();
@@ -1075,7 +1085,8 @@ mod tests {
     fn typing_into_body_textarea_inserts_text() {
         let mut app = mem_app();
         app.handle_key(key(KeyCode::Char('n')));
-        for _ in 0..4 {
+        // Tab order: Title → Priority → Kind → Group → Deps → Body.
+        for _ in 0..5 {
             app.handle_key(key(KeyCode::Tab));
         }
         for c in "hi".chars() {
@@ -1092,7 +1103,7 @@ mod tests {
     fn enter_in_body_textarea_inserts_newline() {
         let mut app = mem_app();
         app.handle_key(key(KeyCode::Char('n')));
-        for _ in 0..4 {
+        for _ in 0..5 {
             app.handle_key(key(KeyCode::Tab));
         }
         app.handle_key(key(KeyCode::Char('a')));
@@ -1395,8 +1406,12 @@ mod tests {
         for c in "child".chars() {
             app.handle_key(key(KeyCode::Char(c)));
         }
-        app.handle_key(key(KeyCode::Tab));
-        app.handle_key(key(KeyCode::Tab));
+        // Tab order: Title → Priority → Kind → Group → Deps.
+        // Step from Title to Group (3 tabs), enter the group name, then to
+        // Deps (1 tab).
+        for _ in 0..3 {
+            app.handle_key(key(KeyCode::Tab));
+        }
         for c in "v0.2".chars() {
             app.handle_key(key(KeyCode::Char(c)));
         }
@@ -1497,5 +1512,213 @@ mod tests {
             .join("");
         assert!(s.contains("Filter title/body"));
         assert!(s.contains("hi"));
+    }
+
+    // ---------- kind handling ----------
+
+    fn seed_task_with_kind(app: &mut App, title: &str, kind: &str) -> i64 {
+        let id = insert_task(
+            &app.conn,
+            NewTask {
+                title,
+                body: None,
+                acceptance: None,
+                deps_json: None,
+                priority: 2,
+                group_id: None,
+                kind,
+                status: "open",
+            },
+        )
+        .unwrap();
+        app.reload().unwrap();
+        id
+    }
+
+    #[test]
+    fn edit_modal_cycles_kind_with_arrow_keys_and_save_persists_it() {
+        let mut app = mem_app();
+        let id = seed_task_with_kind(&mut app, "alpha", "feature");
+
+        // Open the edit form on the seeded task.
+        app.handle_key(key(KeyCode::Char('e')));
+
+        // Tab from Title → Priority → Kind.
+        app.handle_key(key(KeyCode::Tab));
+        app.handle_key(key(KeyCode::Tab));
+
+        // Cycle Right once: feature (index 1 in KINDS) should move to chore.
+        app.handle_key(key(KeyCode::Right));
+
+        // Save.
+        app.handle_key(key_with(KeyCode::Char('s'), KeyModifiers::CONTROL));
+
+        assert_eq!(app.screen, Screen::Main);
+        let task = app.tasks.iter().find(|t| t.id == id).expect("task missing");
+        assert_eq!(
+            task.kind, "chore",
+            "Right arrow on Kind field should cycle feature → chore and save must persist it"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn dump_edit_modal_for_human_inspection() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut app = mem_app();
+        seed_task_with_kind(&mut app, "alpha", "feature");
+        app.handle_key(key(KeyCode::Char('e')));
+        // Focus the Kind row so the dropdown affordance is visible.
+        app.handle_key(key(KeyCode::Tab));
+        app.handle_key(key(KeyCode::Tab));
+
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let area = buf.area();
+        eprintln!("---- edit modal (Kind focused) ----");
+        for y in 0..area.height {
+            let mut row = String::new();
+            for x in 0..area.width {
+                row.push_str(buf[(x, y)].symbol());
+            }
+            eprintln!("{}", row);
+        }
+    }
+
+    #[test]
+    fn edit_modal_renders_kind_field_with_current_value() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut app = mem_app();
+        seed_task_with_kind(&mut app, "alpha", "chore");
+        app.handle_key(key(KeyCode::Char('e')));
+
+        let backend = TestBackend::new(120, 60);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let area = buf.area();
+        let mut rows: Vec<String> = Vec::new();
+        for y in 0..area.height {
+            let mut row = String::new();
+            for x in 0..area.width {
+                row.push_str(buf[(x, y)].symbol());
+            }
+            rows.push(row);
+        }
+        let dump = rows.join("\n");
+        assert!(
+            dump.contains("Kind"),
+            "edit modal should render a `Kind` label; got:\n{}",
+            dump
+        );
+        assert!(
+            dump.contains("chore"),
+            "edit modal should show the task's current kind `chore`; got:\n{}",
+            dump
+        );
+    }
+
+    #[test]
+    fn editing_a_task_preserves_its_kind() {
+        let mut app = mem_app();
+        let id = seed_task_with_kind(&mut app, "the bug", "bug");
+
+        // Open the edit form; bump the title (form has to be dirty enough to
+        // save) but never touch kind.
+        app.handle_key(key(KeyCode::Char('e')));
+        app.handle_key(key(KeyCode::Char('!')));
+        app.handle_key(key_with(KeyCode::Char('s'), KeyModifiers::CONTROL));
+
+        let task = app.tasks.iter().find(|t| t.id == id).expect("task missing");
+        assert_eq!(
+            task.kind, "bug",
+            "TUI edit must preserve kind, not silently reset it to feature"
+        );
+    }
+
+    /// Render the full TUI and slice each row down to just the list pane
+    /// (its `Constraint::Length(40)` plus a tiny buffer for the border).
+    fn render_list_pane() -> impl Fn(&mut App) -> String {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        move |app: &mut App| {
+            let backend = TestBackend::new(120, 60);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal.draw(|f| app.render(f)).unwrap();
+            let buf = terminal.backend().buffer().clone();
+            let area = buf.area();
+            let mut rows: Vec<String> = Vec::new();
+            let list_width = 40u16.min(area.width);
+            for y in 0..area.height {
+                let mut row = String::new();
+                for x in 0..list_width {
+                    row.push_str(buf[(x, y)].symbol());
+                }
+                rows.push(row);
+            }
+            rows.join("\n")
+        }
+    }
+
+    #[test]
+    fn task_list_renders_kind_inline() {
+        let mut app = mem_app();
+        // Title intentionally free of any vocabulary word so a hit can only
+        // come from the kind cell, not a title substring.
+        seed_task_with_kind(&mut app, "alpha", "bug");
+
+        let list = render_list_pane()(&mut app);
+        assert!(
+            list.contains("bug") && !list.contains("[bug]"),
+            "task list row should surface kind shorthand `bug` without brackets; got:\n{}",
+            list
+        );
+    }
+
+    #[test]
+    fn task_list_renders_kind_as_three_letter_shorthand() {
+        let mut app = mem_app();
+        seed_task_with_kind(&mut app, "alpha", "feature");
+        seed_task_with_kind(&mut app, "beta", "chore");
+
+        let list = render_list_pane()(&mut app);
+        assert!(
+            list.contains("fea") && !list.contains("[feature]"),
+            "feature task should render as `fea` shorthand, no brackets; got:\n{}",
+            list
+        );
+        assert!(
+            list.contains("cho") && !list.contains("[chore]"),
+            "chore task should render as `cho` shorthand, no brackets; got:\n{}",
+            list
+        );
+    }
+
+    #[test]
+    fn task_detail_renders_kind() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut app = mem_app();
+        seed_task_with_kind(&mut app, "alpha", "chore");
+
+        let backend = TestBackend::new(120, 60);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let s: String = buf
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(
+            s.contains("chore"),
+            "detail pane should surface kind `chore`; got:\n{}",
+            s
+        );
     }
 }

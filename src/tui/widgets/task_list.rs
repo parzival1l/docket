@@ -4,7 +4,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
 use ratatui::Frame;
 
-use crate::model::{fmt_id, Task};
+use crate::model::{fmt_id, kind_short, Task};
 
 fn status_style(status: &str) -> Style {
     match status {
@@ -35,6 +35,10 @@ pub fn render(
             let line = Line::from(vec![
                 Span::raw(format!("{:<6}", fmt_id(t.id))),
                 Span::styled(format!("{:<12}", t.status), status_style(&t.status)),
+                Span::styled(
+                    format!("{:<4}", kind_short(&t.kind)),
+                    Style::default().add_modifier(Modifier::DIM),
+                ),
                 Span::raw(format!("p{} ", t.priority)),
                 Span::raw(t.title.clone()),
                 Span::styled(group_suffix, Style::default().add_modifier(Modifier::DIM)),

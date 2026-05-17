@@ -3,7 +3,7 @@
 use tui_input::Input;
 use tui_textarea::TextArea;
 
-use crate::model::{fmt_id, Task};
+use crate::model::{fmt_id, Task, KINDS};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditMode {
@@ -15,15 +15,17 @@ pub enum EditMode {
 pub enum EditField {
     Title,
     Priority,
+    Kind,
     Group,
     Deps,
     Body,
     Acceptance,
 }
 
-pub const FIELD_ORDER: [EditField; 6] = [
+pub const FIELD_ORDER: [EditField; 7] = [
     EditField::Title,
     EditField::Priority,
+    EditField::Kind,
     EditField::Group,
     EditField::Deps,
     EditField::Body,
@@ -35,6 +37,7 @@ pub struct EditState {
     pub field: EditField,
     pub title: Input,
     pub priority: Input,
+    pub kind: String,
     pub group: Input,
     pub deps: Input,
     pub body: TextArea<'static>,
@@ -42,6 +45,7 @@ pub struct EditState {
     pub error: Option<String>,
     orig_title: String,
     orig_priority: String,
+    orig_kind: String,
     orig_group: String,
     orig_deps: String,
     orig_body: String,
@@ -55,6 +59,7 @@ impl std::fmt::Debug for EditState {
             .field("field", &self.field)
             .field("title", &self.title.value())
             .field("priority", &self.priority.value())
+            .field("kind", &self.kind)
             .field("group", &self.group.value())
             .field("deps", &self.deps.value())
             .field("body", &self.body.lines().join("\n"))
@@ -66,7 +71,7 @@ impl std::fmt::Debug for EditState {
 
 impl EditState {
     pub fn for_add() -> Self {
-        Self::build(EditMode::Add, "", "", "", "", "", "")
+        Self::build(EditMode::Add, "", "", "feature", "", "", "", "")
     }
 
     pub fn for_edit(task: &Task) -> Self {
@@ -80,6 +85,7 @@ impl EditState {
             EditMode::Edit { id: task.id },
             &task.title,
             &task.priority.to_string(),
+            &task.kind,
             task.group.as_deref().unwrap_or(""),
             &deps_str,
             task.body.as_deref().unwrap_or(""),
@@ -87,10 +93,12 @@ impl EditState {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build(
         mode: EditMode,
         title: &str,
         priority: &str,
+        kind: &str,
         group: &str,
         deps: &str,
         body: &str,
@@ -115,6 +123,7 @@ impl EditState {
             field: EditField::Title,
             title: Input::default().with_value(title.to_string()),
             priority: Input::default().with_value(priority.to_string()),
+            kind: kind.to_string(),
             group: Input::default().with_value(group.to_string()),
             deps: Input::default().with_value(deps.to_string()),
             body: body_ta,
@@ -122,11 +131,24 @@ impl EditState {
             error: None,
             orig_title: title.to_string(),
             orig_priority: priority.to_string(),
+            orig_kind: kind.to_string(),
             orig_group: group.to_string(),
             orig_deps: deps.to_string(),
             orig_body: body.to_string(),
             orig_acceptance: acceptance.to_string(),
         }
+    }
+
+    /// Cycle to the next kind in the vocabulary. Wraps around.
+    pub fn cycle_kind_forward(&mut self) {
+        let i = KINDS.iter().position(|k| *k == self.kind).unwrap_or(0);
+        self.kind = KINDS[(i + 1) % KINDS.len()].to_string();
+    }
+
+    /// Cycle to the previous kind in the vocabulary. Wraps around.
+    pub fn cycle_kind_backward(&mut self) {
+        let i = KINDS.iter().position(|k| *k == self.kind).unwrap_or(0);
+        self.kind = KINDS[(i + KINDS.len() - 1) % KINDS.len()].to_string();
     }
 
     /// Live, per-field validation. Returns the error for the currently
@@ -163,13 +185,14 @@ impl EditState {
                         .map(|e| format!("deps: {}", e))
                 }
             }
-            EditField::Group | EditField::Body | EditField::Acceptance => None,
+            EditField::Kind | EditField::Group | EditField::Body | EditField::Acceptance => None,
         }
     }
 
     pub fn is_dirty(&self) -> bool {
         self.title.value() != self.orig_title
             || self.priority.value() != self.orig_priority
+            || self.kind != self.orig_kind
             || self.group.value() != self.orig_group
             || self.deps.value() != self.orig_deps
             || self.body.lines().join("\n") != self.orig_body
@@ -201,6 +224,7 @@ pub struct ValidatedForm {
     pub deps_json: Option<String>,
     pub priority: i32,
     pub group: Option<String>,
+    pub kind: String,
 }
 
 impl EditState {
@@ -258,6 +282,7 @@ impl EditState {
             deps_json,
             priority,
             group,
+            kind: self.kind.clone(),
         })
     }
 }
@@ -290,6 +315,7 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
+            Constraint::Length(3),
             Constraint::Length(6),
             Constraint::Length(6),
             Constraint::Length(1),
@@ -313,9 +339,15 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
         &state.priority,
         state.field == EditField::Priority,
     );
-    render_input_row(
+    render_kind_row(
         frame,
         rows[2],
+        &state.kind,
+        state.field == EditField::Kind,
+    );
+    render_input_row(
+        frame,
+        rows[3],
         "Group",
         "optional, e.g. v0.1",
         &state.group,
@@ -323,7 +355,7 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
     );
     render_input_row(
         frame,
-        rows[3],
+        rows[4],
         "Deps",
         "T-3, T-5 (optional)",
         &state.deps,
@@ -331,14 +363,14 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
     );
     render_textarea_row(
         frame,
-        rows[4],
+        rows[5],
         "Body",
         &state.body,
         state.field == EditField::Body,
     );
     render_textarea_row(
         frame,
-        rows[5],
+        rows[6],
         "Acceptance",
         &state.acceptance,
         state.field == EditField::Acceptance,
@@ -367,7 +399,7 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
         Span::raw(" cancel"),
     ]))
     .alignment(Alignment::Left);
-    frame.render_widget(hint, rows[6]);
+    frame.render_widget(hint, rows[7]);
 
     let display_err = state.error.clone().or_else(|| state.current_field_error());
     if let Some(err) = display_err {
@@ -375,8 +407,63 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
             err,
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         ));
-        frame.render_widget(p, rows[7]);
+        frame.render_widget(p, rows[8]);
     }
+}
+
+fn render_kind_row(
+    frame: &mut ratatui::Frame,
+    area: ratatui::layout::Rect,
+    kind: &str,
+    focused: bool,
+) {
+    use ratatui::layout::{Constraint, Direction, Layout};
+    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::{Block, Borders, Paragraph};
+
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(12), Constraint::Min(10)])
+        .split(area);
+
+    let lbl_style = if focused {
+        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    };
+    frame.render_widget(Paragraph::new("Kind".to_string()).style(lbl_style), cols[0]);
+
+    let border_style = if focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default()
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(border_style);
+
+    // Render as "  <  feature  >       (←/→ to change)" when focused;
+    // just the value otherwise. The arrows are the affordance.
+    let value_style = if focused {
+        Style::default().add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    };
+    let line = if focused {
+        Line::from(vec![
+            Span::styled("◀ ", Style::default().fg(Color::Cyan)),
+            Span::styled(kind.to_string(), value_style),
+            Span::styled(" ▶", Style::default().fg(Color::Cyan)),
+            Span::styled(
+                "   (←/→ to change)",
+                Style::default().fg(Color::DarkGray),
+            ),
+        ])
+    } else {
+        Line::from(Span::styled(kind.to_string(), value_style))
+    };
+    frame.render_widget(Paragraph::new(line).block(block), cols[1]);
 }
 
 fn render_input_row(
@@ -515,6 +602,7 @@ mod tests {
             status: "open".into(),
             priority: 1,
             group: Some("v0.1".into()),
+            kind: "feature".into(),
             created_at: "t".into(),
             updated_at: "t".into(),
         };

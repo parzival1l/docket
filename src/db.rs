@@ -23,12 +23,14 @@ CREATE TABLE IF NOT EXISTS tasks (
     status      TEXT NOT NULL DEFAULT 'open',
     priority    INTEGER NOT NULL DEFAULT 2,
     group_id    INTEGER REFERENCES groups(id),
+    kind        TEXT NOT NULL DEFAULT 'feature',
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_group  ON tasks(group_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_kind   ON tasks(kind);
 "#;
 
 pub fn find_repo_root(start: &Path) -> Option<PathBuf> {
@@ -57,18 +59,42 @@ pub fn open_db() -> Result<Connection> {
             ".docket/ not initialized in this repo — run `docket init` first"
         ));
     }
-    Ok(Connection::open(&path)?)
+    let conn = Connection::open(&path)?;
+    apply_migrations(&conn)?;
+    Ok(conn)
 }
 
 pub fn init_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(SCHEMA)?;
+    apply_migrations(conn)?;
     Ok(())
+}
+
+/// Apply lightweight, additive schema migrations to bring an older
+/// `.docket/db.sqlite` up to the current shape. Idempotent: safe to run on
+/// already-current databases.
+pub fn apply_migrations(conn: &Connection) -> Result<()> {
+    if !tasks_has_column(conn, "kind")? {
+        conn.execute_batch(
+            "ALTER TABLE tasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'feature';
+             CREATE INDEX IF NOT EXISTS idx_tasks_kind ON tasks(kind);",
+        )?;
+    }
+    Ok(())
+}
+
+fn tasks_has_column(conn: &Connection, col: &str) -> Result<bool> {
+    let mut stmt = conn.prepare("PRAGMA table_info(tasks)")?;
+    let names: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(names.iter().any(|n| n == col))
 }
 
 pub fn load_all_tasks(conn: &Connection) -> Result<Vec<Task>> {
     let mut stmt = conn.prepare(
         "SELECT t.id, t.title, t.body, t.acceptance, t.deps, t.status, t.priority,
-                g.name, t.created_at, t.updated_at
+                g.name, t.kind, t.created_at, t.updated_at
          FROM tasks t LEFT JOIN groups g ON t.group_id = g.id
          ORDER BY t.priority, t.id",
     )?;
@@ -84,8 +110,9 @@ pub fn load_all_tasks(conn: &Connection) -> Result<Vec<Task>> {
                 status: r.get(5)?,
                 priority: r.get(6)?,
                 group: r.get(7)?,
-                created_at: r.get(8)?,
-                updated_at: r.get(9)?,
+                kind: r.get(8)?,
+                created_at: r.get(9)?,
+                updated_at: r.get(10)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -158,14 +185,16 @@ pub struct NewTask<'a> {
     pub deps_json: Option<&'a str>,
     pub priority: i32,
     pub group_id: Option<i64>,
+    pub kind: &'a str,
+    pub status: &'a str,
 }
 
 pub fn insert_task(conn: &Connection, t: NewTask) -> Result<i64> {
     let n = now();
     conn.execute(
-        "INSERT INTO tasks (title, body, acceptance, deps, status, priority, group_id, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, 'open', ?5, ?6, ?7, ?7)",
-        params![t.title, t.body, t.acceptance, t.deps_json, t.priority, t.group_id, n],
+        "INSERT INTO tasks (title, body, acceptance, deps, status, priority, group_id, kind, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+        params![t.title, t.body, t.acceptance, t.deps_json, t.status, t.priority, t.group_id, t.kind, n],
     )?;
     Ok(conn.last_insert_rowid())
 }
@@ -193,6 +222,7 @@ pub struct TaskUpdate<'a> {
     pub deps_json: Option<&'a str>,
     pub priority: i32,
     pub group_id: Option<i64>,
+    pub kind: &'a str,
 }
 
 pub struct TaskFieldUpdate<'a> {
@@ -202,6 +232,7 @@ pub struct TaskFieldUpdate<'a> {
     pub deps_json: Option<&'a str>,
     pub priority: Option<i32>,
     pub group_id: Option<i64>,
+    pub kind: Option<&'a str>,
 }
 
 /// Updates only the fields whose corresponding `Option` is `Some`. Always
@@ -215,8 +246,9 @@ pub fn update_task_fields(conn: &Connection, id: i64, t: TaskFieldUpdate) -> Res
             deps       = COALESCE(?4, deps),
             priority   = COALESCE(?5, priority),
             group_id   = COALESCE(?6, group_id),
-            updated_at = ?7
-         WHERE id = ?8",
+            kind       = COALESCE(?7, kind),
+            updated_at = ?8
+         WHERE id = ?9",
         params![
             t.title,
             t.body,
@@ -224,6 +256,7 @@ pub fn update_task_fields(conn: &Connection, id: i64, t: TaskFieldUpdate) -> Res
             t.deps_json,
             t.priority,
             t.group_id,
+            t.kind,
             now(),
             id
         ],
@@ -237,9 +270,9 @@ pub fn update_task_fields(conn: &Connection, id: i64, t: TaskFieldUpdate) -> Res
 pub fn update_task(conn: &Connection, id: i64, t: TaskUpdate) -> Result<usize> {
     let n = conn.execute(
         "UPDATE tasks SET title = ?1, body = ?2, acceptance = ?3, deps = ?4,
-                          priority = ?5, group_id = ?6, updated_at = ?7
-         WHERE id = ?8",
-        params![t.title, t.body, t.acceptance, t.deps_json, t.priority, t.group_id, now(), id],
+                          priority = ?5, group_id = ?6, kind = ?7, updated_at = ?8
+         WHERE id = ?9",
+        params![t.title, t.body, t.acceptance, t.deps_json, t.priority, t.group_id, t.kind, now(), id],
     )?;
     Ok(n)
 }
@@ -259,6 +292,67 @@ mod tests {
         let c = mem_conn();
         init_schema(&c).unwrap();
         init_schema(&c).unwrap();
+    }
+
+    /// Simulate a pre-T-9 database (no `kind` column), seed a row, and confirm
+    /// `apply_migrations` adds the column without dropping data, defaulting the
+    /// existing row to 'feature'.
+    #[test]
+    fn apply_migrations_adds_kind_column_and_back_fills_feature() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(
+            r#"
+            CREATE TABLE tasks (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                title       TEXT NOT NULL,
+                body        TEXT,
+                acceptance  TEXT,
+                deps        TEXT,
+                status      TEXT NOT NULL DEFAULT 'open',
+                priority    INTEGER NOT NULL DEFAULT 2,
+                group_id    INTEGER,
+                created_at  TEXT NOT NULL,
+                updated_at  TEXT NOT NULL
+            );
+            "#,
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO tasks (title, status, priority, created_at, updated_at)
+             VALUES ('legacy', 'open', 2, 'now', 'now')",
+            [],
+        )
+        .unwrap();
+
+        apply_migrations(&c).unwrap();
+
+        let kind: String = c
+            .query_row("SELECT kind FROM tasks WHERE title = 'legacy'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(kind, "feature");
+
+        // Idempotent: second run must not error or duplicate the column.
+        apply_migrations(&c).unwrap();
+    }
+
+    #[test]
+    fn init_schema_includes_kind_column_for_fresh_dbs() {
+        let c = mem_conn();
+        // Fresh DB created via SCHEMA must already carry the `kind` column.
+        let cols: Vec<String> = c
+            .prepare("PRAGMA table_info(tasks)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(
+            cols.iter().any(|c| c == "kind"),
+            "fresh schema must include `kind`; got columns: {:?}",
+            cols
+        );
     }
 
     #[test]
@@ -305,6 +399,8 @@ mod tests {
                 deps_json: None,
                 priority: 2,
                 group_id: None,
+                kind: "feature",
+                status: "open",
             },
         )
         .unwrap()
@@ -322,6 +418,8 @@ mod tests {
                 deps_json: Some("[1,2]"),
                 priority: 1,
                 group_id: None,
+                kind: "feature",
+                status: "open",
             },
         )
         .unwrap();
@@ -335,6 +433,7 @@ mod tests {
         assert_eq!(t.deps, vec![1, 2]);
         assert_eq!(t.priority, 1);
         assert_eq!(t.status, "open");
+        assert_eq!(t.kind, "feature");
     }
 
     #[test]
@@ -384,6 +483,7 @@ mod tests {
                 deps_json: Some("[3]"),
                 priority: 0,
                 group_id: None,
+                kind: "feature",
             },
         )
         .unwrap();
@@ -411,6 +511,7 @@ mod tests {
                 deps_json: None,
                 priority: 2,
                 group_id: None,
+                kind: "feature",
             },
         )
         .unwrap();
@@ -431,6 +532,7 @@ mod tests {
                 deps_json: None,
                 priority: 2,
                 group_id: None,
+                kind: "feature",
             },
         )
         .unwrap();

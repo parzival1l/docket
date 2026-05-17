@@ -213,6 +213,41 @@ fn update_body_and_acceptance_accept_values_starting_with_hyphen() {
     assert_eq!(j["acceptance"], accept);
 }
 
+// ---------- bare invocation (T-16) ----------
+
+#[test]
+fn bare_docket_does_not_print_help_text() {
+    // Bare `docket` should launch the TUI, not print help. In a non-tty test
+    // environment the TUI cannot fully initialize, but the key observable is
+    // that clap's help dump no longer appears on either stream.
+    let repo = Repo::new();
+    let out = repo.run(&[]);
+    let combined = format!("{}{}", stdout_of(&out), stderr_of(&out));
+    assert!(
+        !combined.contains("Usage: docket <COMMAND>"),
+        "bare `docket` should not print clap help text; got:\n{}",
+        combined
+    );
+    assert!(
+        !combined.contains("Print this message or the help of the given subcommand(s)"),
+        "bare `docket` should not print clap's help listing; got:\n{}",
+        combined
+    );
+}
+
+#[test]
+fn long_help_flag_still_prints_help() {
+    let repo = Repo::new();
+    let out = repo.run(&["--help"]);
+    assert!(out.status.success(), "--help should succeed");
+    let s = stdout_of(&out);
+    assert!(
+        s.to_lowercase().contains("usage"),
+        "--help should print help; got:\n{}",
+        s
+    );
+}
+
 #[test]
 fn short_help_and_version_flags_still_work() {
     let repo = Repo::new();
@@ -232,6 +267,180 @@ fn short_help_and_version_flags_still_work() {
         v_out.contains("docket"),
         "-V should print version with binary name; got:\n{}",
         v_out
+    );
+}
+
+// ---------- add --kind ----------
+
+#[test]
+fn add_without_kind_defaults_to_feature() {
+    let repo = Repo::new();
+    let id = repo.add_simple("default kind");
+    let j = repo.show_json(&id);
+    assert_eq!(
+        j["kind"], "feature",
+        "tasks created without --kind should default to feature"
+    );
+}
+
+#[test]
+fn add_with_kind_bug_round_trips_through_show_json() {
+    let repo = Repo::new();
+    let out = repo.run(&["add", "a clap bug", "--kind", "bug"]);
+    assert!(
+        out.status.success(),
+        "add --kind bug failed: {}",
+        stderr_of(&out)
+    );
+    let id = stdout_of(&out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+    let j = repo.show_json(&id);
+    assert_eq!(j["kind"], "bug");
+}
+
+#[test]
+fn add_with_unknown_kind_errors_and_lists_vocabulary() {
+    let repo = Repo::new();
+    let out = repo.run(&["add", "broken", "--kind", "nonsense"]);
+    assert!(
+        !out.status.success(),
+        "add --kind nonsense should fail; got success"
+    );
+    let err = stderr_of(&out).to_lowercase();
+    for k in &["bug", "feature", "chore", "docs", "spike"] {
+        assert!(
+            err.contains(k),
+            "error message should list `{}`; got:\n{}",
+            k,
+            err
+        );
+    }
+}
+
+#[test]
+fn add_accepts_all_documented_kinds() {
+    let repo = Repo::new();
+    for k in &["bug", "feature", "chore", "docs", "spike"] {
+        let out = repo.run(&["add", &format!("a {}", k), "--kind", k]);
+        assert!(
+            out.status.success(),
+            "add --kind {} failed: {}",
+            k,
+            stderr_of(&out)
+        );
+        let id = stdout_of(&out)
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .to_string();
+        assert_eq!(repo.show_json(&id)["kind"], *k);
+    }
+}
+
+#[test]
+fn ls_kind_filter_excludes_other_kinds() {
+    let repo = Repo::new();
+    let bug_out = repo.run(&["add", "the bug", "--kind", "bug"]);
+    assert!(bug_out.status.success());
+    let bug_id = stdout_of(&bug_out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+    let feat_id = repo.add_simple("the feature");
+
+    let out = repo.run(&["ls", "--kind", "bug"]);
+    assert!(out.status.success(), "ls --kind bug failed: {}", stderr_of(&out));
+    let s = stdout_of(&out);
+    assert!(s.contains(&bug_id), "bug id should be listed; got:\n{}", s);
+    assert!(
+        !s.contains(&feat_id),
+        "feature id should be filtered out; got:\n{}",
+        s
+    );
+}
+
+#[test]
+fn ls_default_output_uses_kind_shorthand_without_brackets() {
+    let repo = Repo::new();
+    let feat_id = repo.add_simple("a feature task");
+    let bug_out = repo.run(&["add", "a bug task", "--kind", "bug"]);
+    assert!(bug_out.status.success());
+    let bug_id = stdout_of(&bug_out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+
+    let out = repo.run(&["ls"]);
+    let s = stdout_of(&out);
+
+    let feat_row = s
+        .lines()
+        .find(|l| l.contains(&feat_id))
+        .unwrap_or_else(|| panic!("no ls row for {}; got:\n{}", feat_id, s));
+    assert!(
+        feat_row.contains("fea") && !feat_row.contains("[feature]"),
+        "feature row should use `fea` shorthand without brackets; got:\n{}",
+        feat_row
+    );
+
+    let bug_row = s
+        .lines()
+        .find(|l| l.contains(&bug_id))
+        .unwrap_or_else(|| panic!("no ls row for {}; got:\n{}", bug_id, s));
+    assert!(
+        bug_row.contains("bug") && !bug_row.contains("[bug]"),
+        "bug row should use `bug` shorthand without brackets; got:\n{}",
+        bug_row
+    );
+}
+
+#[test]
+fn ls_default_output_surfaces_kind() {
+    let repo = Repo::new();
+    let bug_out = repo.run(&["add", "the bug", "--kind", "bug"]);
+    assert!(bug_out.status.success());
+    let bug_id = stdout_of(&bug_out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+
+    let out = repo.run(&["ls"]);
+    let s = stdout_of(&out);
+    // The bug task's row must surface its kind so a scanner can see it.
+    let row = s
+        .lines()
+        .find(|l| l.contains(&bug_id))
+        .unwrap_or_else(|| panic!("no ls row for {}; got:\n{}", bug_id, s));
+    assert!(
+        row.contains("bug"),
+        "ls row for {} should mention kind `bug`; got:\n{}",
+        bug_id,
+        row
+    );
+}
+
+#[test]
+fn show_text_output_includes_kind() {
+    let repo = Repo::new();
+    let out = repo.run(&["add", "the bug", "--kind", "bug"]);
+    assert!(out.status.success());
+    let id = stdout_of(&out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+    let out = repo.run(&["show", &id]);
+    let s = stdout_of(&out);
+    assert!(
+        s.contains("bug"),
+        "show text output should mention kind `bug`; got:\n{}",
+        s
     );
 }
 
@@ -677,4 +886,241 @@ fn two_repos_in_one_test_are_isolated() {
         r1.path().join(".docket/db.sqlite"),
         r2.path().join(".docket/db.sqlite")
     );
+}
+
+// ---------- backlog (T-10) ----------
+
+#[test]
+fn status_command_can_set_backlog_state() {
+    let repo = Repo::new();
+    let id = repo.add_simple("started open");
+    assert!(repo.run(&["status", &id, "backlog"]).status.success());
+    assert_eq!(repo.show_json(&id)["status"], "backlog");
+}
+
+#[test]
+fn promote_flips_backlog_to_open_and_bumps_updated_at() {
+    let repo = Repo::new();
+    let bl_out = repo.run(&["add", "later idea", "--backlog"]);
+    assert!(bl_out.status.success());
+    let id = stdout_of(&bl_out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+    let before = repo.show_json(&id);
+    assert_eq!(before["status"], "backlog");
+    // Sleep so updated_at strictly increases (timestamps are RFC3339).
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+
+    let out = repo.run(&["promote", &id]);
+    assert!(out.status.success(), "promote failed: {}", stderr_of(&out));
+
+    let after = repo.show_json(&id);
+    assert_eq!(after["status"], "open");
+    assert_ne!(
+        after["updated_at"], before["updated_at"],
+        "updated_at should change after promote"
+    );
+}
+
+#[test]
+fn promote_on_non_backlog_task_errors() {
+    let repo = Repo::new();
+    let id = repo.add_simple("already open");
+    let out = repo.run(&["promote", &id]);
+    assert!(
+        !out.status.success(),
+        "promote on non-backlog task should error; got success"
+    );
+    let err = stderr_of(&out).to_lowercase();
+    assert!(
+        err.contains("backlog"),
+        "error should mention backlog; got:\n{}",
+        err
+    );
+    // status must be unchanged
+    assert_eq!(repo.show_json(&id)["status"], "open");
+}
+
+#[test]
+fn promote_missing_id_errors() {
+    let repo = Repo::new();
+    let out = repo.run(&["promote", "T-999"]);
+    assert!(!out.status.success(), "promote on missing id should error");
+}
+
+#[test]
+fn backlog_command_group_filter_excludes_other_groups() {
+    let repo = Repo::new();
+    let in_out = repo.run(&[
+        "add",
+        "in g",
+        "--backlog",
+        "--group",
+        "g",
+    ]);
+    assert!(in_out.status.success());
+    let in_id = stdout_of(&in_out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+    let out_out = repo.run(&["add", "no group", "--backlog"]);
+    assert!(out_out.status.success());
+    let out_id = stdout_of(&out_out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+
+    let out = repo.run(&["backlog", "--group", "g"]);
+    let s = stdout_of(&out);
+    assert!(s.contains(&in_id));
+    assert!(!s.contains(&out_id));
+}
+
+#[test]
+fn backlog_command_json_emits_valid_array() {
+    let repo = Repo::new();
+    repo.run(&["add", "a", "--backlog"]);
+    repo.run(&["add", "b", "--backlog"]);
+    repo.add_simple("open one");
+    let out = repo.run(&["backlog", "--json"]);
+    assert!(out.status.success(), "backlog --json failed: {}", stderr_of(&out));
+    let v: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("backlog --json should emit JSON");
+    let arr = v.as_array().expect("backlog --json should emit array");
+    assert_eq!(arr.len(), 2, "should only include the 2 backlog tasks; got: {:?}", arr);
+}
+
+#[test]
+fn backlog_command_lists_backlog_tasks_and_excludes_others() {
+    let repo = Repo::new();
+    let open_id = repo.add_simple("active task");
+    let bl_out = repo.run(&["add", "later idea", "--backlog"]);
+    assert!(bl_out.status.success());
+    let bl_id = stdout_of(&bl_out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+
+    let out = repo.run(&["backlog"]);
+    assert!(out.status.success(), "backlog cmd failed: {}", stderr_of(&out));
+    let s = stdout_of(&out);
+    assert!(s.contains(&bl_id), "backlog task should appear; got:\n{}", s);
+    assert!(
+        !s.contains(&open_id),
+        "open task should NOT appear in backlog; got:\n{}",
+        s
+    );
+}
+
+#[test]
+fn ready_does_not_show_backlog_tasks() {
+    let repo = Repo::new();
+    let bl_out = repo.run(&["add", "later idea", "--backlog"]);
+    assert!(bl_out.status.success());
+    let bl_id = stdout_of(&bl_out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+
+    let out = repo.run(&["ready"]);
+    assert!(out.status.success());
+    let s = stdout_of(&out);
+    assert!(
+        !s.contains(&bl_id),
+        "backlog task should NOT appear in `ready`; got:\n{}",
+        s
+    );
+}
+
+#[test]
+fn blocked_does_not_show_backlog_tasks() {
+    let repo = Repo::new();
+    let dep = repo.add_simple("dep");
+    let bl_out = repo.run(&[
+        "add",
+        "later dependent",
+        "--backlog",
+        "--deps",
+        &dep,
+    ]);
+    assert!(bl_out.status.success());
+    let bl_id = stdout_of(&bl_out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+
+    let out = repo.run(&["blocked"]);
+    assert!(out.status.success());
+    let s = stdout_of(&out);
+    assert!(
+        !s.contains(&bl_id),
+        "backlog task should NOT appear in `blocked`; got:\n{}",
+        s
+    );
+}
+
+#[test]
+fn ls_status_backlog_shows_backlog_tasks() {
+    let repo = Repo::new();
+    let bl_out = repo.run(&["add", "later idea", "--backlog"]);
+    assert!(bl_out.status.success());
+    let bl_id = stdout_of(&bl_out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+    let open_id = repo.add_simple("active");
+
+    let out = repo.run(&["ls", "--status", "backlog"]);
+    assert!(out.status.success());
+    let s = stdout_of(&out);
+    assert!(s.contains(&bl_id), "backlog id should appear with --status backlog; got:\n{}", s);
+    assert!(!s.contains(&open_id), "open task should be filtered out; got:\n{}", s);
+}
+
+#[test]
+fn ls_default_hides_backlog_tasks() {
+    let repo = Repo::new();
+    let open_id = repo.add_simple("active task");
+    let bl_out = repo.run(&["add", "later idea", "--backlog"]);
+    assert!(bl_out.status.success());
+    let bl_id = stdout_of(&bl_out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+
+    let out = repo.run(&["ls"]);
+    let s = stdout_of(&out);
+    assert!(s.contains(&open_id), "open task should be listed; got:\n{}", s);
+    assert!(
+        !s.contains(&bl_id),
+        "backlog task should be hidden from default ls; got:\n{}",
+        s
+    );
+}
+
+#[test]
+fn add_with_backlog_creates_task_in_backlog_status() {
+    let repo = Repo::new();
+    let out = repo.run(&["add", "later idea", "--backlog"]);
+    assert!(
+        out.status.success(),
+        "add --backlog failed: {}",
+        stderr_of(&out)
+    );
+    let id = stdout_of(&out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+    let j = repo.show_json(&id);
+    assert_eq!(j["status"], "backlog");
 }

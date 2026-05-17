@@ -23,3 +23,4 @@ target
 # docket per-repo task store
 .docket/
 .codex/prompts/
+AGENTS.md

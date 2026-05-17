@@ -32,6 +32,7 @@ mod tests {
             status: "open".into(),
             priority: 2,
             group: None,
+            kind: "feature".into(),
             created_at: "t".into(),
             updated_at: "t".into(),
         }

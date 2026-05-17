@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 
 use crate::db::{get_or_create_group, open_db, update_task_fields, TaskFieldUpdate};
-use crate::model::{fmt_id, parse_deps, parse_id};
+use crate::model::{fmt_id, parse_deps, parse_id, validate_kind};
 
 pub fn run(
     id: String,
@@ -11,6 +11,7 @@ pub fn run(
     deps: Option<String>,
     priority: Option<i32>,
     group: Option<String>,
+    kind: Option<String>,
 ) -> Result<()> {
     if title.is_none()
         && body.is_none()
@@ -18,10 +19,15 @@ pub fn run(
         && deps.is_none()
         && priority.is_none()
         && group.is_none()
+        && kind.is_none()
     {
         return Err(anyhow!(
-            "no fields to update — pass at least one of --title, --body, --acceptance, --deps, --priority, --group"
+            "no fields to update — pass at least one of --title, --body, --acceptance, --deps, --priority, --group, --kind"
         ));
+    }
+
+    if let Some(k) = kind.as_deref() {
+        validate_kind(k)?;
     }
 
     let id = parse_id(&id)?;
@@ -43,6 +49,7 @@ pub fn run(
             deps_json: deps_json.as_deref(),
             priority,
             group_id,
+            kind: kind.as_deref(),
         },
     )?;
     if n == 0 {

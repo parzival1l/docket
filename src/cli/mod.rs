@@ -1,9 +1,10 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-use crate::model::{fmt_id, Task};
+use crate::model::{fmt_id, kind_short, Task};
 
 pub mod add;
+pub mod backlog;
 pub mod blocked;
 pub mod group;
 pub mod init;
@@ -24,9 +25,10 @@ pub(crate) fn print_task_row(t: &Task) {
         .map(|g| format!(" [{}]", g))
         .unwrap_or_default();
     println!(
-        "{:<6} {:<12} p{} {}{}",
+        "{:<6} {:<12} {:<4} p{} {}{}",
         fmt_id(t.id),
         t.status,
+        kind_short(&t.kind),
         t.priority,
         t.title,
         group_str
@@ -37,7 +39,7 @@ pub(crate) fn print_task_row(t: &Task) {
 #[command(name = "docket", version, about = "Agent-shaped task tracker with TDD execution harness")]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 #[derive(Subcommand)]
@@ -60,13 +62,25 @@ pub enum Command {
         /// Group name; created lazily if it doesn't exist
         #[arg(long)]
         group: Option<String>,
+        /// One of: bug, feature, chore, docs, spike (default: feature)
+        #[arg(long, value_parser = ["bug", "feature", "chore", "docs", "spike"])]
+        kind: Option<String>,
+        /// Park the task in the backlog instead of `open` — captures the idea without
+        /// cluttering `ls`/`ready`. Surface it later with `docket backlog`, pull it
+        /// onto the active board with `docket promote T-N`.
+        #[arg(long)]
+        backlog: bool,
     },
-    /// List tasks
+    /// List active tasks. Hides `backlog` by default; pass `--status backlog`
+    /// (or use `docket backlog`) to see parked tasks.
     Ls {
         #[arg(long)]
         status: Option<String>,
         #[arg(long)]
         group: Option<String>,
+        /// Filter by kind: bug, feature, chore, docs, spike
+        #[arg(long, value_parser = ["bug", "feature", "chore", "docs", "spike"])]
+        kind: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -76,21 +90,38 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Tasks ready to pick up (open with all deps done)
+    /// Tasks ready to pick up (status = `open` with all deps `done`).
+    /// Backlog tasks are excluded — promote them first with `docket promote T-N`.
     Ready {
         #[arg(long)]
         group: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// Tasks blocked by unmet deps (debug view)
+    /// Tasks blocked by unmet deps (debug view). Backlog tasks are excluded.
     Blocked {
         #[arg(long)]
         group: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// Set status (open | in_progress | done — or any string)
+    /// List parked tasks (status = `backlog`). The backlog is a separate "later" list
+    /// that does NOT appear in `ls`/`ready`/`blocked`. Use `docket promote T-N` to
+    /// move a task from here onto the active board.
+    Backlog {
+        #[arg(long)]
+        group: Option<String>,
+        /// Filter by kind: bug, feature, chore, docs, spike
+        #[arg(long, value_parser = ["bug", "feature", "chore", "docs", "spike"])]
+        kind: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Move a task from `backlog` to `open` (pull it onto the active board).
+    /// Errors if the task isn't currently in backlog.
+    Promote { id: String },
+    /// Set status (backlog | open | in_progress | done — or any string).
+    /// Lifecycle: backlog → open → in_progress → done.
     Status { id: String, state: String },
     /// Mark task done
     Done { id: String },
@@ -114,6 +145,9 @@ pub enum Command {
         /// Group name; created lazily if it doesn't exist
         #[arg(long)]
         group: Option<String>,
+        /// One of: bug, feature, chore, docs, spike
+        #[arg(long, value_parser = ["bug", "feature", "chore", "docs", "spike"])]
+        kind: Option<String>,
     },
     /// Print a prompt template to stdout
     Prompt {
@@ -164,7 +198,11 @@ pub enum GroupCommand {
 }
 
 pub fn dispatch(cli: Cli) -> Result<()> {
-    match cli.command {
+    let command = match cli.command {
+        Some(c) => c,
+        None => return tui::run(),
+    };
+    match command {
         Command::Init => init::run(),
         Command::Add {
             title,
@@ -173,11 +211,20 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             deps,
             priority,
             group,
-        } => add::run(title, body, acceptance, deps, priority, group),
-        Command::Ls { status, group, json } => ls::run(status, group, json),
+            kind,
+            backlog,
+        } => add::run(title, body, acceptance, deps, priority, group, kind, backlog),
+        Command::Ls {
+            status,
+            group,
+            kind,
+            json,
+        } => ls::run(status, group, kind, json),
         Command::Show { id, json } => show::run(id, json),
         Command::Ready { group, json } => ready::run(group, json),
         Command::Blocked { group, json } => blocked::run(group, json),
+        Command::Backlog { group, kind, json } => backlog::run(group, kind, json),
+        Command::Promote { id } => status::promote(id),
         Command::Status { id, state } => status::run(id, state),
         Command::Done { id } => status::done(id),
         Command::Rm { id } => rm::run(id),
@@ -189,7 +236,8 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             deps,
             priority,
             group,
-        } => update::run(id, title, body, acceptance, deps, priority, group),
+            kind,
+        } => update::run(id, title, body, acceptance, deps, priority, group, kind),
         Command::Prompt { name } => prompt::run(name),
         Command::Start { id, tmux } => start::run(
             id,

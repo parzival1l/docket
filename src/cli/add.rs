@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::db::{self, get_or_create_group, open_db, NewTask};
-use crate::model::{fmt_id, parse_deps};
+use crate::model::{fmt_id, parse_deps, validate_kind};
 
 pub fn run(
     title: String,
@@ -10,7 +10,11 @@ pub fn run(
     deps: Option<String>,
     priority: Option<i32>,
     group: Option<String>,
+    kind: Option<String>,
+    backlog: bool,
 ) -> Result<()> {
+    let kind = kind.unwrap_or_else(|| "feature".to_string());
+    validate_kind(&kind)?;
     let conn = open_db()?;
     let group_id = match group {
         Some(name) => Some(get_or_create_group(&conn, &name)?),
@@ -18,6 +22,7 @@ pub fn run(
     };
     let deps_json = parse_deps(deps)?;
     let priority = priority.unwrap_or(2);
+    let status = if backlog { "backlog" } else { "open" };
     let id = db::insert_task(
         &conn,
         NewTask {
@@ -27,6 +32,8 @@ pub fn run(
             deps_json: deps_json.as_deref(),
             priority,
             group_id,
+            kind: &kind,
+            status,
         },
     )?;
     println!("{} added", fmt_id(id));
