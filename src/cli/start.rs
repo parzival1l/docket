@@ -7,7 +7,14 @@ use crate::db::{load_all_tasks, open_db};
 use crate::model::{fmt_id, now, parse_id};
 use crate::prompts::assemble_prompt;
 
-pub fn run(id: String, tmux: bool) -> Result<()> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TmuxDelivery {
+    Off,
+    Auto,
+    ForceSpawn,
+}
+
+pub fn run(id: String, delivery: TmuxDelivery) -> Result<()> {
     let id = parse_id(&id)?;
     let conn = open_db()?;
     let all = load_all_tasks(&conn)?;
@@ -26,19 +33,16 @@ pub fn run(id: String, tmux: bool) -> Result<()> {
 
     let prompt = assemble_prompt(t);
 
-    if tmux {
-        if std::env::var_os("TMUX").is_none() {
-            return Err(anyhow!(
-                "not inside a tmux session — run `docket start {} | claude` or start tmux first",
-                fmt_id(t.id)
-            ));
+    match delivery {
+        TmuxDelivery::Off => {
+            print!("{}", prompt);
         }
-        deliver_via_tmux(t.id, &prompt)?;
-        mark_in_progress(&conn, t.id)?;
-        return Ok(());
+        TmuxDelivery::Auto | TmuxDelivery::ForceSpawn => {
+            let force_spawn = matches!(delivery, TmuxDelivery::ForceSpawn);
+            deliver_via_tmux_session(t.id, &prompt, force_spawn)?;
+        }
     }
 
-    print!("{}", prompt);
     mark_in_progress(&conn, t.id)?;
     Ok(())
 }
@@ -51,31 +55,42 @@ fn mark_in_progress(conn: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
-fn deliver_via_tmux(id: i64, prompt: &str) -> Result<()> {
+fn deliver_via_tmux_session(id: i64, prompt: &str, force_spawn: bool) -> Result<()> {
     let ts = Utc::now().timestamp_nanos_opt().unwrap_or(0);
     let prompt_path = std::env::temp_dir().join(format!("docket-{}-{}.md", fmt_id(id), ts));
     fs::write(&prompt_path, prompt)
         .with_context(|| format!("failed to write prompt tempfile {}", prompt_path.display()))?;
 
-    let window_name = format!("docket {}", fmt_id(id));
-    let new_window = std::process::Command::new("tmux")
-        .args(["new-window", "-n", &window_name, "-P", "-F", "#{window_id}"])
+    let session_name = format!("docket-{}-{}", fmt_id(id), ts);
+
+    let new_session = std::process::Command::new("tmux")
+        .args([
+            "new-session",
+            "-d",
+            "-s",
+            &session_name,
+            "-P",
+            "-F",
+            "#{session_id}",
+        ])
         .output()
-        .context("failed to invoke tmux new-window")?;
-    if !new_window.status.success() {
+        .context("failed to invoke tmux new-session")?;
+    if !new_session.status.success() {
         return Err(anyhow!(
-            "tmux new-window failed: {}",
-            String::from_utf8_lossy(&new_window.stderr)
+            "tmux new-session failed: {}",
+            String::from_utf8_lossy(&new_session.stderr)
         ));
     }
-    let window_id = String::from_utf8_lossy(&new_window.stdout).trim().to_string();
-    if window_id.is_empty() {
-        return Err(anyhow!("tmux new-window did not return a window id"));
+    let session_id = String::from_utf8_lossy(&new_session.stdout)
+        .trim()
+        .to_string();
+    if session_id.is_empty() {
+        return Err(anyhow!("tmux new-session did not return a session id"));
     }
 
     let cmd = format!("claude < {}", prompt_path.display());
     let send = std::process::Command::new("tmux")
-        .args(["send-keys", "-t", &window_id, &cmd, "Enter"])
+        .args(["send-keys", "-t", &session_id, &cmd, "Enter"])
         .output()
         .context("failed to invoke tmux send-keys")?;
     if !send.status.success() {
@@ -84,5 +99,81 @@ fn deliver_via_tmux(id: i64, prompt: &str) -> Result<()> {
             String::from_utf8_lossy(&send.stderr)
         ));
     }
+
+    let inside_tmux = std::env::var_os("TMUX").is_some();
+    if inside_tmux && !force_spawn {
+        let switch = std::process::Command::new("tmux")
+            .args(["switch-client", "-t", &session_id])
+            .output()
+            .context("failed to invoke tmux switch-client")?;
+        if !switch.status.success() {
+            return Err(anyhow!(
+                "tmux switch-client failed: {}",
+                String::from_utf8_lossy(&switch.stderr)
+            ));
+        }
+    } else {
+        spawn_terminal_with_attach(&session_name)?;
+    }
+
     Ok(())
+}
+
+fn spawn_terminal_with_attach(session_name: &str) -> Result<()> {
+    let attach_cmd = format!("tmux attach -t {}", session_name);
+    let spawn_template = resolve_terminal_spawner()?;
+    let expanded = spawn_template.replace("{cmd}", &attach_cmd);
+
+    let out = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(&expanded)
+        .output()
+        .with_context(|| format!("failed to spawn terminal via: {}", expanded))?;
+    if !out.status.success() {
+        return Err(anyhow!(
+            "terminal spawn failed (cmd: {}): {}",
+            expanded,
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    Ok(())
+}
+
+fn resolve_terminal_spawner() -> Result<String> {
+    if let Ok(custom) = std::env::var("DOCKET_TERMINAL_CMD") {
+        if !custom.trim().is_empty() {
+            if !custom.contains("{cmd}") {
+                return Err(anyhow!(
+                    "$DOCKET_TERMINAL_CMD must contain '{{cmd}}' placeholder; got: {}",
+                    custom
+                ));
+            }
+            return Ok(custom);
+        }
+    }
+
+    if let Ok(prog) = std::env::var("TERM_PROGRAM") {
+        if let Some(tpl) = builtin_terminal_template(&prog) {
+            return Ok(tpl.to_string());
+        }
+    }
+
+    Err(anyhow!(
+        "could not determine how to spawn a terminal window. \
+         Set $DOCKET_TERMINAL_CMD to a shell command containing '{{cmd}}', e.g.:\n  \
+         export DOCKET_TERMINAL_CMD='open -na Ghostty.app --args -e {{cmd}}'\n\
+         (the {{cmd}} placeholder will be replaced with `tmux attach -t <session>`)"
+    ))
+}
+
+fn builtin_terminal_template(term_program: &str) -> Option<&'static str> {
+    match term_program {
+        "ghostty" | "Ghostty" => Some("open -na Ghostty.app --args -e {cmd}"),
+        "iTerm.app" => Some("open -na iTerm.app --args -e {cmd}"),
+        "Apple_Terminal" => {
+            Some("osascript -e 'tell application \"Terminal\" to do script \"{cmd}\"'")
+        }
+        "WezTerm" => Some("wezterm start -- sh -c '{cmd}; exec $SHELL'"),
+        _ => None,
+    }
 }

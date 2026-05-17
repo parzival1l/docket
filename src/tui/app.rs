@@ -1,3 +1,4 @@
+use crate::cli::start::TmuxDelivery;
 use crate::db::{load_all_tasks, open_db};
 use crate::model::Task;
 use crate::tui::filters::{filtered_indices, Filters};
@@ -17,7 +18,7 @@ pub enum Pane {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StartRequest {
     pub id: i64,
-    pub tmux: bool,
+    pub delivery: TmuxDelivery,
 }
 
 fn next_status(current: &str) -> &'static str {
@@ -158,7 +159,7 @@ impl App {
             }
             (KeyCode::Char('s'), m) if m.contains(KeyModifiers::CONTROL) => {
                 if self.focus == Pane::List {
-                    self.request_start(true);
+                    self.request_start(TmuxDelivery::ForceSpawn);
                 }
                 return;
             }
@@ -210,17 +211,17 @@ impl App {
                 self.open_edit_form();
             }
             KeyCode::Char('S') => {
-                self.request_start(false);
+                self.request_start(TmuxDelivery::Off);
             }
             _ => {}
         }
     }
 
-    fn request_start(&mut self, tmux: bool) {
+    fn request_start(&mut self, delivery: TmuxDelivery) {
         if let Some(task) = self.selected_task() {
             self.pending_start = Some(StartRequest {
                 id: task.id,
-                tmux,
+                delivery,
             });
             self.should_quit = true;
         }
@@ -1204,7 +1205,10 @@ mod tests {
         assert!(app.should_quit);
         assert_eq!(
             app.pending_start,
-            Some(StartRequest { id, tmux: false })
+            Some(StartRequest {
+                id,
+                delivery: TmuxDelivery::Off
+            })
         );
     }
 
@@ -1217,14 +1221,17 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_s_in_list_sets_pending_start_with_tmux_and_quits() {
+    fn ctrl_s_in_list_sets_pending_start_with_force_spawn_and_quits() {
         let mut app = mem_app_with(&[("a", "open", 2)]);
         let id = app.selected_task().unwrap().id;
         app.handle_key(key_with(KeyCode::Char('s'), KeyModifiers::CONTROL));
         assert!(app.should_quit);
         assert_eq!(
             app.pending_start,
-            Some(StartRequest { id, tmux: true })
+            Some(StartRequest {
+                id,
+                delivery: TmuxDelivery::ForceSpawn
+            })
         );
     }
 

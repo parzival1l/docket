@@ -123,7 +123,9 @@ pub enum Command {
     /// Start a task: assemble its prompt and print to stdout, mark in_progress
     Start {
         id: String,
-        /// Open a new tmux window in the current session and deliver the prompt to it
+        /// Create a fresh tmux session running claude with the prompt piped in,
+        /// then attach (switch-client inside tmux, or spawn a terminal window
+        /// via $DOCKET_TERMINAL_CMD when outside tmux).
         #[arg(long)]
         tmux: bool,
     },
@@ -189,7 +191,14 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             group,
         } => update::run(id, title, body, acceptance, deps, priority, group),
         Command::Prompt { name } => prompt::run(name),
-        Command::Start { id, tmux } => start::run(id, tmux),
+        Command::Start { id, tmux } => start::run(
+            id,
+            if tmux {
+                start::TmuxDelivery::Auto
+            } else {
+                start::TmuxDelivery::Off
+            },
+        ),
         Command::Group { action } => match action {
             GroupCommand::New {
                 name,

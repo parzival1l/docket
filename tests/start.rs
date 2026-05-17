@@ -107,16 +107,24 @@ impl FakeTmux {
         let log_path = bin_dir.join("calls.log");
         let script_path = bin_dir.join("tmux");
         // The fake tmux records the full argv (one call per line, tab-delimited)
-        // and emits a fake window id when invoked with `new-window -P`.
+        // and emits a fake window/session id when invoked with `new-window -P`
+        // or `new-session -P`.
         let script = format!(
             "#!/bin/sh\n\
 LOG='{log}'\n\
 {{ printf 'CALL'; for a in \"$@\"; do printf '\\t%s' \"$a\"; done; printf '\\n'; }} >> \"$LOG\"\n\
-if [ \"$1\" = \"new-window\" ]; then\n\
-  for a in \"$@\"; do\n\
-    if [ \"$a\" = \"-P\" ]; then echo '@99'; break; fi\n\
-  done\n\
-fi\n\
+case \"$1\" in\n\
+  new-window)\n\
+    for a in \"$@\"; do\n\
+      if [ \"$a\" = \"-P\" ]; then echo '@99'; break; fi\n\
+    done\n\
+    ;;\n\
+  new-session)\n\
+    for a in \"$@\"; do\n\
+      if [ \"$a\" = \"-P\" ]; then echo '$99'; break; fi\n\
+    done\n\
+    ;;\n\
+esac\n\
 exit 0\n",
             log = log_path.display()
         );
@@ -371,51 +379,128 @@ fn start_on_already_in_progress_task_succeeds_and_reprints() {
     );
 }
 
+#[cfg(unix)]
 #[test]
-fn start_tmux_outside_tmux_session_fails_and_does_not_mutate() {
+fn start_tmux_outside_tmux_spawns_terminal_with_attach() {
     let repo = TestRepo::new();
     let id = repo.add("widgets", Some("body content"), Some("acceptance"));
-    let before = show_json(&repo, &id);
 
+    let fake = FakeTmux::new();
+    let n = SEQ.fetch_add(1, Ordering::Relaxed);
+    let spawn_log = env::temp_dir().join(format!(
+        "docket-spawn-{}-{}.log",
+        std::process::id(),
+        n
+    ));
+    // The fake spawner just records the expanded attach command. Using a
+    // single-quoted shell snippet avoids surprises with how {cmd} substitutes.
+    let spawn_cmd = format!("printf '%s\\n' \"{{cmd}}\" >> {}", spawn_log.display());
+
+    let original_path = env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", fake.bin_dir.display(), original_path);
     let out = Command::new(bin())
         .args(["start", &id, "--tmux"])
         .current_dir(&repo.dir)
+        .env("PATH", new_path)
         .env_remove("TMUX")
+        .env("DOCKET_TERMINAL_CMD", &spawn_cmd)
+        .output()
+        .unwrap();
+
+    assert!(
+        out.status.success(),
+        "outside-tmux --tmux should spawn a terminal and succeed; stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let calls = fake.calls();
+    assert!(
+        calls
+            .iter()
+            .any(|c| c.first().map(|s| s.as_str()) == Some("new-session")),
+        "expected `tmux new-session` call; got: {:#?}",
+        calls
+    );
+    assert!(
+        calls
+            .iter()
+            .any(|c| c.first().map(|s| s.as_str()) == Some("send-keys")),
+        "expected `tmux send-keys` call; got: {:#?}",
+        calls
+    );
+    assert!(
+        !calls
+            .iter()
+            .any(|c| c.first().map(|s| s.as_str()) == Some("switch-client")),
+        "switch-client should NOT be called when $TMUX is unset; got: {:#?}",
+        calls
+    );
+
+    // Spawner was invoked with `tmux attach -t docket-T-N-<ts>`
+    let spawn_content = fs::read_to_string(&spawn_log).unwrap_or_default();
+    assert!(
+        spawn_content.contains("tmux attach -t docket-"),
+        "terminal spawner should have been invoked with attach command; got:\n{}",
+        spawn_content
+    );
+
+    // Status flipped on success
+    let after = show_json(&repo, &id);
+    assert_eq!(
+        after["status"], "in_progress",
+        "status should flip to in_progress when --tmux succeeds via spawn"
+    );
+
+    let _ = fs::remove_file(&spawn_log);
+}
+
+#[cfg(unix)]
+#[test]
+fn start_tmux_outside_no_spawn_config_errors_helpfully() {
+    let repo = TestRepo::new();
+    let id = repo.add("t", Some("b"), Some("a"));
+    let before = show_json(&repo, &id);
+
+    let fake = FakeTmux::new();
+    let original_path = env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", fake.bin_dir.display(), original_path);
+    let out = Command::new(bin())
+        .args(["start", &id, "--tmux"])
+        .current_dir(&repo.dir)
+        .env("PATH", new_path)
+        .env_remove("TMUX")
+        .env_remove("DOCKET_TERMINAL_CMD")
+        .env_remove("TERM_PROGRAM")
         .output()
         .unwrap();
 
     assert!(
         !out.status.success(),
-        "expected failure when --tmux used outside a tmux session; got success.\nstdout: {}",
+        "expected failure when no spawn config is available; stdout: {}",
         String::from_utf8_lossy(&out.stdout)
     );
     let stderr = String::from_utf8_lossy(&out.stderr).to_lowercase();
     assert!(
-        stderr.contains("tmux session"),
-        "stderr should explain that we're not inside a tmux session; got:\n{}",
-        stderr
-    );
-    // sanity: must not be a clap parser error (e.g. unrecognized flag)
-    assert!(
-        !stderr.contains("unexpected argument") && !stderr.contains("unrecognized"),
-        "stderr should be the runtime tmux check, not clap arg parsing; got:\n{}",
+        stderr.contains("docket_terminal_cmd"),
+        "stderr should mention DOCKET_TERMINAL_CMD as the fix; got:\n{}",
         stderr
     );
 
+    // status must NOT change — mark_in_progress runs only after delivery succeeds
     let after = show_json(&repo, &id);
     assert_eq!(
         before["status"], after["status"],
-        "task status must not change on failed --tmux invocation"
+        "status must not change when spawn config is missing"
     );
     assert_eq!(
         before["updated_at"], after["updated_at"],
-        "updated_at must not be bumped on failed --tmux invocation"
+        "updated_at must not be bumped on failed spawn"
     );
 }
 
 #[cfg(unix)]
 #[test]
-fn start_tmux_inside_session_opens_window_and_delivers_prompt_via_tempfile() {
+fn start_tmux_inside_session_creates_new_session_and_switches_client() {
     let repo = TestRepo::new();
     let id = repo.add(
         "Make widgets",
@@ -434,22 +519,31 @@ fn start_tmux_inside_session_opens_window_and_delivers_prompt_via_tempfile() {
     let calls = fake.calls();
     assert!(!calls.is_empty(), "fake tmux should have been invoked at least once");
 
-    // 1) new-window with the right name was called
-    let new_window_call = calls
+    // 1) new-session was called with a session name shaped `docket-T-N-<ts>`
+    let new_session_call = calls
         .iter()
-        .find(|c| c.first().map(|s| s.as_str()) == Some("new-window"))
-        .unwrap_or_else(|| panic!("no `new-window` call recorded; calls:\n{:#?}", calls));
-    let expected_name = format!("docket {}", id);
-    let has_name_flag = new_window_call
+        .find(|c| c.first().map(|s| s.as_str()) == Some("new-session"))
+        .unwrap_or_else(|| panic!("no `new-session` call recorded; calls:\n{:#?}", calls));
+    let session_name_prefix = format!("docket-{}-", id);
+    let has_session_name = new_session_call
         .windows(2)
-        .any(|w| w[0] == "-n" && w[1] == expected_name);
+        .any(|w| w[0] == "-s" && w[1].starts_with(&session_name_prefix));
     assert!(
-        has_name_flag,
-        "new-window should be invoked with `-n {}`; got: {:?}",
-        expected_name, new_window_call
+        has_session_name,
+        "new-session should be invoked with `-s {}<ts>`; got: {:?}",
+        session_name_prefix, new_session_call
     );
 
-    // 2) send-keys was called and references a tempfile path that exists with the prompt content
+    // 2) switch-client was called (because $TMUX is set)
+    assert!(
+        calls
+            .iter()
+            .any(|c| c.first().map(|s| s.as_str()) == Some("switch-client")),
+        "switch-client should be called when $TMUX is set; got: {:#?}",
+        calls
+    );
+
+    // 3) send-keys was called and references a tempfile path that exists with the prompt content
     let send_keys_call = calls
         .iter()
         .find(|c| c.first().map(|s| s.as_str()) == Some("send-keys"))
