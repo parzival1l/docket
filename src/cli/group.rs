@@ -1,0 +1,117 @@
+use anyhow::{anyhow, Result};
+use rusqlite::params;
+use serde::Serialize;
+
+use crate::db::{load_all_groups, load_all_tasks, load_group_by_name, open_db};
+use crate::model::{now, Group, Task};
+
+use super::print_task_row;
+
+pub fn new(name: String, branch: Option<String>, description: Option<String>) -> Result<()> {
+    let conn = open_db()?;
+    if load_group_by_name(&conn, &name)?.is_some() {
+        return Err(anyhow!("group `{}` already exists", name));
+    }
+    conn.execute(
+        "INSERT INTO groups (name, branch_name, description, state, created_at)
+         VALUES (?1, ?2, ?3, 'open', ?4)",
+        params![name, branch, description, now()],
+    )?;
+    println!("group `{}` created", name);
+    Ok(())
+}
+
+pub fn ls(json: bool) -> Result<()> {
+    let conn = open_db()?;
+    let groups = load_all_groups(&conn)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&groups)?);
+        return Ok(());
+    }
+
+    if groups.is_empty() {
+        println!("(no groups)");
+        return Ok(());
+    }
+
+    for g in &groups {
+        let counts: (i64, i64, i64) = conn.query_row(
+            "SELECT
+                COUNT(*),
+                COALESCE(SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END), 0)
+             FROM tasks WHERE group_id = ?1",
+            params![g.id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?;
+        let branch_str = g
+            .branch_name
+            .as_deref()
+            .map(|b| format!(" branch={}", b))
+            .unwrap_or_default();
+        println!(
+            "{:<20} [{}]  {}/{} done{}",
+            g.name, g.state, counts.1, counts.0, branch_str
+        );
+    }
+    Ok(())
+}
+
+pub fn show(name: String, json: bool) -> Result<()> {
+    let conn = open_db()?;
+    let g = load_group_by_name(&conn, &name)?
+        .ok_or_else(|| anyhow!("group `{}` not found", name))?;
+
+    let all = load_all_tasks(&conn)?;
+    let group_tasks: Vec<&Task> = all
+        .iter()
+        .filter(|t| t.group.as_deref() == Some(g.name.as_str()))
+        .collect();
+
+    if json {
+        #[derive(Serialize)]
+        struct GroupShow<'a> {
+            group: &'a Group,
+            tasks: Vec<&'a Task>,
+        }
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&GroupShow {
+                group: &g,
+                tasks: group_tasks
+            })?
+        );
+    } else {
+        println!("group: {}  [{}]", g.name, g.state);
+        if let Some(b) = &g.branch_name {
+            println!("branch: {}", b);
+        }
+        if let Some(d) = &g.description {
+            println!("description: {}", d);
+        }
+        println!("created: {}", g.created_at);
+        println!();
+        if group_tasks.is_empty() {
+            println!("(no tasks in this group)");
+        } else {
+            for t in &group_tasks {
+                print_task_row(t);
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn close(name: String) -> Result<()> {
+    let conn = open_db()?;
+    let n = conn.execute(
+        "UPDATE groups SET state = 'closed' WHERE name = ?1",
+        params![name],
+    )?;
+    if n == 0 {
+        return Err(anyhow!("group `{}` not found", name));
+    }
+    println!("group `{}` closed", name);
+    Ok(())
+}

@@ -1,6 +1,6 @@
 [package]
 name = "docket"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2021"
 description = "Agent-shaped task tracker with TDD execution harness"
 
@@ -15,6 +15,15 @@ anyhow = "1"
 chrono = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+ratatui = "0.29"
+crossterm = "0.28"
+tui-input = "0.11"
+tui-textarea = "0.7"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
 
 [profile.release]
 lto = true
