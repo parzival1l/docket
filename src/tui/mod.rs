@@ -17,6 +17,13 @@ pub mod widgets;
 
 use app::App;
 
+/// What the TUI was holding when it quit. At most one variant is populated.
+#[derive(Debug, Default)]
+pub struct TuiExit {
+    pub start: Option<app::StartRequest>,
+    pub open_session: Option<app::OpenSessionRequest>,
+}
+
 /// RAII guard that restores the terminal to a usable state when dropped,
 /// even if the event loop panics. Without this, a panic during render or
 /// event handling leaves the shell in raw mode + alt screen.
@@ -48,7 +55,7 @@ impl Drop for TerminalGuard {
     }
 }
 
-pub fn run_tui() -> Result<Option<app::StartRequest>> {
+pub fn run_tui() -> Result<TuiExit> {
     let mut app = App::new()?;
     let mut guard = TerminalGuard::new()?;
 
@@ -65,5 +72,8 @@ pub fn run_tui() -> Result<Option<app::StartRequest>> {
             break;
         }
     }
-    Ok(app.pending_start)
+    Ok(TuiExit {
+        start: app.pending_start,
+        open_session: app.pending_open_session,
+    })
 }

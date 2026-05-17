@@ -7,6 +7,7 @@ pub enum Scope {
     FilterPrompt,
     Confirm,
     Edit,
+    SessionPicker,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -32,6 +33,10 @@ pub const COMMAND_REGISTRY: &[Binding] = &[
     Binding { keys: "x", label: "delete", scope: Scope::List, footer: true },
     Binding { keys: "S", label: "start", scope: Scope::List, footer: true },
     Binding { keys: "Ctrl+S", label: "start (tmux)", scope: Scope::List, footer: false },
+    Binding { keys: "O", label: "open session", scope: Scope::Global, footer: false },
+    Binding { keys: "j/k", label: "nav", scope: Scope::SessionPicker, footer: true },
+    Binding { keys: "Enter", label: "open", scope: Scope::SessionPicker, footer: true },
+    Binding { keys: "Esc", label: "cancel", scope: Scope::SessionPicker, footer: true },
     Binding { keys: "f s", label: "filter status", scope: Scope::List, footer: false },
     Binding { keys: "f g", label: "filter group", scope: Scope::List, footer: false },
     Binding { keys: "f p", label: "filter priority", scope: Scope::List, footer: false },

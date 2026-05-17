@@ -18,6 +18,7 @@ pub fn render(frame: &mut Frame) {
         Scope::FilterPrompt,
         Scope::Confirm,
         Scope::Edit,
+        Scope::SessionPicker,
     ] {
         let scope_label = match scope {
             Scope::Global => "Global",
@@ -27,6 +28,7 @@ pub fn render(frame: &mut Frame) {
             Scope::FilterPrompt => "Filter prompt",
             Scope::Confirm => "Confirm",
             Scope::Edit => "Edit form",
+            Scope::SessionPicker => "Open session picker",
         };
         lines.push(Line::from(Span::styled(
             scope_label.to_string(),

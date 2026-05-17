@@ -43,6 +43,10 @@ pub struct EditState {
     pub body: TextArea<'static>,
     pub acceptance: TextArea<'static>,
     pub error: Option<String>,
+    /// Read-only mirror of the linked agent sessions for this task. Surfaced
+    /// in the edit modal so users can see which Claude/Codex runs touched the
+    /// task; not editable here — use `docket session link/unlink`.
+    pub agent_sessions: Vec<String>,
     orig_title: String,
     orig_priority: String,
     orig_kind: String,
@@ -71,7 +75,7 @@ impl std::fmt::Debug for EditState {
 
 impl EditState {
     pub fn for_add() -> Self {
-        Self::build(EditMode::Add, "", "", "feature", "", "", "", "")
+        Self::build(EditMode::Add, "", "", "feature", "", "", "", "", vec![])
     }
 
     pub fn for_edit(task: &Task) -> Self {
@@ -90,6 +94,7 @@ impl EditState {
             &deps_str,
             task.body.as_deref().unwrap_or(""),
             task.acceptance.as_deref().unwrap_or(""),
+            task.agent_sessions.clone(),
         )
     }
 
@@ -103,6 +108,7 @@ impl EditState {
         deps: &str,
         body: &str,
         acceptance: &str,
+        agent_sessions: Vec<String>,
     ) -> Self {
         let body_lines: Vec<String> = if body.is_empty() {
             vec![String::new()]
@@ -129,6 +135,7 @@ impl EditState {
             body: body_ta,
             acceptance: acc_ta,
             error: None,
+            agent_sessions,
             orig_title: title.to_string(),
             orig_priority: priority.to_string(),
             orig_kind: kind.to_string(),
@@ -308,9 +315,13 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
 
+    let show_sessions_row = matches!(state.mode, EditMode::Edit { .. });
+    let sessions_row_h: u16 = if show_sessions_row { 1 } else { 0 };
+
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
+            Constraint::Length(sessions_row_h),
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
@@ -323,9 +334,33 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
         ])
         .split(inner);
 
+    if show_sessions_row {
+        let line = if state.agent_sessions.is_empty() {
+            Line::from(vec![
+                Span::styled(
+                    "Sessions: ",
+                    Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "(none — link via `docket session link`)",
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ])
+        } else {
+            Line::from(vec![
+                Span::styled(
+                    "Sessions: ",
+                    Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(state.agent_sessions.join(", ")),
+            ])
+        };
+        frame.render_widget(Paragraph::new(line), rows[0]);
+    }
+
     render_input_row(
         frame,
-        rows[0],
+        rows[1],
         "Title",
         "task title",
         &state.title,
@@ -333,7 +368,7 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
     );
     render_input_row(
         frame,
-        rows[1],
+        rows[2],
         "Priority",
         "0..4 (default 2)",
         &state.priority,
@@ -341,13 +376,13 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
     );
     render_kind_row(
         frame,
-        rows[2],
+        rows[3],
         &state.kind,
         state.field == EditField::Kind,
     );
     render_input_row(
         frame,
-        rows[3],
+        rows[4],
         "Group",
         "optional, e.g. v0.1",
         &state.group,
@@ -355,7 +390,7 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
     );
     render_input_row(
         frame,
-        rows[4],
+        rows[5],
         "Deps",
         "T-3, T-5 (optional)",
         &state.deps,
@@ -363,14 +398,14 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
     );
     render_textarea_row(
         frame,
-        rows[5],
+        rows[6],
         "Body",
         &state.body,
         state.field == EditField::Body,
     );
     render_textarea_row(
         frame,
-        rows[6],
+        rows[7],
         "Acceptance",
         &state.acceptance,
         state.field == EditField::Acceptance,
@@ -399,7 +434,7 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
         Span::raw(" cancel"),
     ]))
     .alignment(Alignment::Left);
-    frame.render_widget(hint, rows[7]);
+    frame.render_widget(hint, rows[8]);
 
     let display_err = state.error.clone().or_else(|| state.current_field_error());
     if let Some(err) = display_err {
@@ -407,7 +442,7 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
             err,
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         ));
-        frame.render_widget(p, rows[8]);
+        frame.render_widget(p, rows[9]);
     }
 }
 

@@ -200,6 +200,12 @@ pub enum SessionCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Resume a previously-linked session in a fresh tmux session running
+    /// `claude --resume <session_id>` (same attach path as `start --tmux`).
+    Open {
+        /// Session id
+        session_id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -284,6 +290,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             } => session::link(task_id, session_id),
             SessionCommand::Unlink { session_id } => session::unlink(session_id),
             SessionCommand::Show { session_id, json } => session::show(session_id, json),
+            SessionCommand::Open { session_id } => session::open(session_id, false),
         },
         Command::Group { action } => match action {
             GroupCommand::New {

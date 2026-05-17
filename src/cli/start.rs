@@ -63,13 +63,22 @@ fn deliver_via_tmux_session(id: i64, prompt: &str, force_spawn: bool) -> Result<
         .with_context(|| format!("failed to write prompt tempfile {}", prompt_path.display()))?;
 
     let session_name = format!("docket-{}-{}", fmt_id(id), ts);
+    let cmd = format!("claude < {}", prompt_path.display());
+    spawn_tmux_session(&session_name, &cmd, force_spawn)?;
+    Ok(session_name)
+}
 
+/// Create a detached tmux session named `session_name`, send `command` into
+/// it, then either switch-client (when inside tmux and force_spawn=false) or
+/// spawn an external terminal that attaches to it. The session name is
+/// returned so callers can record it.
+pub fn spawn_tmux_session(session_name: &str, command: &str, force_spawn: bool) -> Result<()> {
     let new_session = std::process::Command::new("tmux")
         .args([
             "new-session",
             "-d",
             "-s",
-            &session_name,
+            session_name,
             "-P",
             "-F",
             "#{session_id}",
@@ -89,9 +98,8 @@ fn deliver_via_tmux_session(id: i64, prompt: &str, force_spawn: bool) -> Result<
         return Err(anyhow!("tmux new-session did not return a session id"));
     }
 
-    let cmd = format!("claude < {}", prompt_path.display());
     let send = std::process::Command::new("tmux")
-        .args(["send-keys", "-t", &session_id, &cmd, "Enter"])
+        .args(["send-keys", "-t", &session_id, command, "Enter"])
         .output()
         .context("failed to invoke tmux send-keys")?;
     if !send.status.success() {
@@ -114,10 +122,10 @@ fn deliver_via_tmux_session(id: i64, prompt: &str, force_spawn: bool) -> Result<
             ));
         }
     } else {
-        spawn_terminal_with_attach(&session_name)?;
+        spawn_terminal_with_attach(session_name)?;
     }
 
-    Ok(session_name)
+    Ok(())
 }
 
 fn spawn_terminal_with_attach(session_name: &str) -> Result<()> {

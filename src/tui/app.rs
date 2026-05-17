@@ -3,7 +3,7 @@ use crate::db::{load_all_tasks, open_db};
 use crate::model::Task;
 use crate::tui::filters::{filtered_indices, Filters};
 use crate::tui::screens::edit::{EditMode, EditState};
-use crate::tui::screens::{FilterKind, PendingAction, Screen};
+use crate::tui::screens::{FilterKind, PendingAction, Screen, SessionPickerState};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
@@ -19,6 +19,12 @@ pub enum Pane {
 pub struct StartRequest {
     pub id: i64,
     pub delivery: TmuxDelivery,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenSessionRequest {
+    pub task_id: i64,
+    pub session_id: String,
 }
 
 fn next_status(current: &str) -> &'static str {
@@ -40,6 +46,7 @@ pub struct App {
     pub pending_chord: Option<char>,
     pub should_quit: bool,
     pub pending_start: Option<StartRequest>,
+    pub pending_open_session: Option<OpenSessionRequest>,
 }
 
 impl App {
@@ -56,6 +63,7 @@ impl App {
             pending_chord: None,
             should_quit: false,
             pending_start: None,
+            pending_open_session: None,
         })
     }
 
@@ -81,6 +89,7 @@ impl App {
             Screen::FilterPrompt { .. } => self.handle_filter_prompt(key),
             Screen::Confirm(_) => self.handle_confirm(key),
             Screen::Edit(_) => self.handle_edit(key),
+            Screen::SessionPicker(_) => self.handle_session_picker(key),
         }
     }
 
@@ -163,12 +172,101 @@ impl App {
                 }
                 return;
             }
+            (KeyCode::Char('O'), _) => {
+                self.request_open_session();
+                return;
+            }
             _ => {}
         }
 
         match self.focus {
             Pane::List => self.handle_list(key),
             Pane::Detail => self.handle_detail(key),
+        }
+    }
+
+    /// Try to open one of the agent sessions linked to the currently-selected
+    /// task. 0 sessions → silent noop; 1 → dispatch directly; 2+ → open the
+    /// session-picker modal. Enriches each session id with title / turns /
+    /// last-activity from Claude's local transcript when available.
+    fn request_open_session(&mut self) {
+        let Some(task) = self.selected_task() else {
+            return;
+        };
+        let task_id = task.id;
+        let task_title = task.title.clone();
+
+        // Pull (id, linked_at) pairs from the db so the fallback display has
+        // a "linked X ago" timestamp for ids without transcripts on disk.
+        let links = crate::db::task_session_links(&self.conn, task_id).unwrap_or_default();
+        let infos: Vec<crate::agent_session_info::SessionInfo> = links
+            .into_iter()
+            .map(|(sid, linked_at_str)| {
+                let linked_at = chrono::DateTime::parse_from_rfc3339(&linked_at_str)
+                    .ok()
+                    .map(|dt| dt.with_timezone(&chrono::Utc));
+                crate::agent_session_info::inspect(&sid, linked_at)
+            })
+            .collect();
+
+        match infos.len() {
+            0 => {}
+            1 => {
+                self.pending_open_session = Some(OpenSessionRequest {
+                    task_id,
+                    session_id: infos.into_iter().next().unwrap().id,
+                });
+                self.should_quit = true;
+            }
+            _ => {
+                self.screen = Screen::SessionPicker(SessionPickerState {
+                    task_id,
+                    task_title,
+                    sessions: infos,
+                    cursor: 0,
+                });
+            }
+        }
+    }
+
+    fn handle_session_picker(&mut self, key: KeyEvent) {
+        let Screen::SessionPicker(state) = &mut self.screen else {
+            return;
+        };
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.screen = Screen::Main;
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if !state.sessions.is_empty() && state.cursor + 1 < state.sessions.len() {
+                    state.cursor += 1;
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                state.cursor = state.cursor.saturating_sub(1);
+            }
+            KeyCode::Char('g') => {
+                state.cursor = 0;
+            }
+            KeyCode::Char('G') => {
+                state.cursor = state.sessions.len().saturating_sub(1);
+            }
+            KeyCode::Enter => {
+                let session_id = state
+                    .sessions
+                    .get(state.cursor)
+                    .map(|s| s.id.clone())
+                    .unwrap_or_default();
+                let task_id = state.task_id;
+                if !session_id.is_empty() {
+                    self.pending_open_session = Some(OpenSessionRequest {
+                        task_id,
+                        session_id,
+                    });
+                    self.should_quit = true;
+                }
+            }
+            _ => {}
         }
     }
 
@@ -537,6 +635,9 @@ impl App {
                     Screen::Confirm(action) => {
                         crate::tui::screens::confirm::render(frame, action)
                     }
+                    Screen::SessionPicker(state) => {
+                        crate::tui::screens::session_picker::render(frame, state)
+                    }
                     Screen::Main | Screen::Edit(_) => {}
                 }
             }
@@ -564,7 +665,31 @@ mod tests {
             pending_chord: None,
             should_quit: false,
             pending_start: None,
+            pending_open_session: None,
         }
+    }
+
+    /// Seed a task with the given linked session ids. Returns the task id.
+    fn seed_task_with_sessions(app: &mut App, title: &str, sessions: &[&str]) -> i64 {
+        let id = insert_task(
+            &app.conn,
+            NewTask {
+                title,
+                body: None,
+                acceptance: None,
+                deps_json: None,
+                priority: 2,
+                group_id: None,
+                kind: "feature",
+                status: "open",
+            },
+        )
+        .unwrap();
+        for s in sessions {
+            crate::db::link_session(&app.conn, id, s).unwrap();
+        }
+        app.reload().unwrap();
+        id
     }
 
     fn mem_app_with(seed: &[(&str, &str, i32)]) -> App {
@@ -1695,6 +1820,190 @@ mod tests {
             list.contains("cho") && !list.contains("[chore]"),
             "chore task should render as `cho` shorthand, no brackets; got:\n{}",
             list
+        );
+    }
+
+    // ---------- agent_sessions / open-session picker ----------
+
+    #[test]
+    fn capital_o_with_no_sessions_is_a_noop() {
+        let mut app = mem_app_with(&[("a", "open", 2)]);
+        app.handle_key(key(KeyCode::Char('O')));
+        assert!(app.pending_open_session.is_none());
+        assert!(!app.should_quit);
+        assert_eq!(app.screen, Screen::Main);
+    }
+
+    #[test]
+    fn capital_o_with_one_session_dispatches_directly_and_quits() {
+        let mut app = mem_app();
+        let id = seed_task_with_sessions(&mut app, "alpha", &["sess-only"]);
+        app.handle_key(key(KeyCode::Char('O')));
+        assert!(app.should_quit, "single-session O should quit the TUI");
+        assert_eq!(
+            app.pending_open_session,
+            Some(OpenSessionRequest {
+                task_id: id,
+                session_id: "sess-only".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn capital_o_with_multiple_sessions_opens_picker_modal() {
+        let mut app = mem_app();
+        let id = seed_task_with_sessions(&mut app, "alpha", &["s1", "s2", "s3"]);
+        app.handle_key(key(KeyCode::Char('O')));
+        match &app.screen {
+            Screen::SessionPicker(state) => {
+                assert_eq!(state.task_id, id);
+                assert_eq!(state.sessions.len(), 3);
+                assert_eq!(state.cursor, 0);
+            }
+            other => panic!("expected SessionPicker, got {:?}", other),
+        }
+        assert!(!app.should_quit, "picker should NOT quit immediately");
+    }
+
+    #[test]
+    fn session_picker_j_k_moves_cursor() {
+        let mut app = mem_app();
+        seed_task_with_sessions(&mut app, "alpha", &["s1", "s2", "s3"]);
+        app.handle_key(key(KeyCode::Char('O')));
+        app.handle_key(key(KeyCode::Char('j')));
+        if let Screen::SessionPicker(state) = &app.screen {
+            assert_eq!(state.cursor, 1);
+        } else {
+            panic!("expected SessionPicker");
+        }
+        app.handle_key(key(KeyCode::Char('k')));
+        if let Screen::SessionPicker(state) = &app.screen {
+            assert_eq!(state.cursor, 0);
+        } else {
+            panic!();
+        }
+    }
+
+    #[test]
+    fn session_picker_j_clamps_at_last_session() {
+        let mut app = mem_app();
+        seed_task_with_sessions(&mut app, "alpha", &["s1", "s2"]);
+        app.handle_key(key(KeyCode::Char('O')));
+        app.handle_key(key(KeyCode::Char('j')));
+        app.handle_key(key(KeyCode::Char('j')));
+        app.handle_key(key(KeyCode::Char('j')));
+        if let Screen::SessionPicker(state) = &app.screen {
+            assert_eq!(state.cursor, 1);
+        } else {
+            panic!();
+        }
+    }
+
+    #[test]
+    fn session_picker_enter_dispatches_focused_session_and_quits() {
+        let mut app = mem_app();
+        let id = seed_task_with_sessions(&mut app, "alpha", &["s1", "s2", "s3"]);
+        app.handle_key(key(KeyCode::Char('O')));
+        app.handle_key(key(KeyCode::Char('j'))); // cursor → 1 → "s2"
+        app.handle_key(key(KeyCode::Enter));
+        assert!(app.should_quit);
+        assert_eq!(
+            app.pending_open_session,
+            Some(OpenSessionRequest {
+                task_id: id,
+                session_id: "s2".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn session_picker_esc_cancels_returns_to_main() {
+        let mut app = mem_app();
+        seed_task_with_sessions(&mut app, "alpha", &["s1", "s2"]);
+        app.handle_key(key(KeyCode::Char('O')));
+        app.handle_key(key(KeyCode::Esc));
+        assert_eq!(app.screen, Screen::Main);
+        assert!(app.pending_open_session.is_none());
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn capital_o_on_empty_list_is_a_noop() {
+        let mut app = mem_app();
+        app.handle_key(key(KeyCode::Char('O')));
+        assert!(app.pending_open_session.is_none());
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn edit_modal_renders_sessions_line_for_task_with_sessions() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut app = mem_app();
+        seed_task_with_sessions(&mut app, "alpha", &["sess-abc-123"]);
+        app.handle_key(key(KeyCode::Char('e')));
+
+        let backend = TestBackend::new(120, 60);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let s: String = buf
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(
+            s.contains("Sessions"),
+            "edit modal should surface a `Sessions` label; got:\n{}",
+            s
+        );
+        assert!(
+            s.contains("sess-abc-123"),
+            "edit modal should list the linked session id; got:\n{}",
+            s
+        );
+    }
+
+    #[test]
+    fn session_picker_modal_renders_task_id_and_session_ids() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut app = mem_app();
+        let id = seed_task_with_sessions(&mut app, "widget", &["s-one", "s-two"]);
+        app.handle_key(key(KeyCode::Char('O')));
+
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let s: String = buf
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(
+            s.contains(&crate::model::fmt_id(id)),
+            "picker should show task id; got:\n{}",
+            s
+        );
+        assert!(s.contains("s-one"), "picker should list session s-one");
+        assert!(s.contains("s-two"), "picker should list session s-two");
+        assert!(
+            s.contains("resume"),
+            "picker title should reference resuming a session; got:\n{}",
+            s
+        );
+        assert!(
+            s.contains("Pick one to resume"),
+            "header copy should prompt the user; got:\n{}",
+            s
+        );
+        assert!(
+            s.to_lowercase().contains("no transcript"),
+            "test sessions have no transcript on disk — picker should say so; got:\n{}",
+            s
         );
     }
 

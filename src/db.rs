@@ -182,6 +182,22 @@ pub fn unlink_session(conn: &Connection, session_id: &str) -> Result<usize> {
     Ok(n)
 }
 
+/// Fetch the (session_id, linked_at) pairs for a task, ordered by link time.
+pub fn task_session_links(conn: &Connection, task_id: i64) -> Result<Vec<(String, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT session_id, linked_at FROM agent_sessions
+         WHERE task_id = ?1 ORDER BY linked_at, session_id",
+    )?;
+    let rows = stmt.query_map(params![task_id], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
 /// Resolve a session id back to its task id, if any.
 pub fn session_task(conn: &Connection, session_id: &str) -> Result<Option<i64>> {
     let t: Option<i64> = conn
