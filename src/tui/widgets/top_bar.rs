@@ -4,7 +4,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-use crate::tui::filters::Filters;
+use crate::tui::filters::{Filters, ViewMode};
 
 pub fn render(frame: &mut Frame, area: Rect, filters: &Filters) {
     let mut spans: Vec<Span> = vec![Span::styled(
@@ -13,6 +13,21 @@ pub fn render(frame: &mut Frame, area: Rect, filters: &Filters) {
     )];
 
     let chip_style = Style::default().fg(Color::Black).bg(Color::Cyan);
+
+    // Always surface the current view first (active is the default but still
+    // shown so the user knows which slice they're on).
+    let view_chip_style = match filters.view {
+        ViewMode::Active => Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM),
+        ViewMode::Done => Style::default().fg(Color::Black).bg(Color::Green),
+        ViewMode::Backlog => Style::default().fg(Color::Black).bg(Color::Magenta),
+    };
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(
+        format!(" {} ", filters.view.label()),
+        view_chip_style,
+    ));
 
     let mut add_chip = |label: String| {
         spans.push(Span::raw("  "));

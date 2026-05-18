@@ -2,8 +2,43 @@ use std::collections::HashMap;
 
 use crate::model::Task;
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum ViewMode {
+    #[default]
+    Active,
+    Done,
+    Backlog,
+}
+
+impl ViewMode {
+    pub fn next(self) -> Self {
+        match self {
+            ViewMode::Active => ViewMode::Done,
+            ViewMode::Done => ViewMode::Backlog,
+            ViewMode::Backlog => ViewMode::Active,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ViewMode::Active => "active",
+            ViewMode::Done => "done",
+            ViewMode::Backlog => "backlog",
+        }
+    }
+
+    fn allows_status(self, status: &str) -> bool {
+        match self {
+            ViewMode::Active => status == "open" || status == "in_progress",
+            ViewMode::Done => status == "done",
+            ViewMode::Backlog => status == "backlog",
+        }
+    }
+}
+
 #[derive(Default, Clone)]
 pub struct Filters {
+    pub view: ViewMode,
     pub status: Option<String>,
     pub group: Option<String>,
     pub priority_cap: Option<i32>,
@@ -15,7 +50,8 @@ pub struct Filters {
 impl Filters {
     #[allow(dead_code)] // used in tests and future top-bar logic
     pub fn is_default(&self) -> bool {
-        self.status.is_none()
+        self.view == ViewMode::Active
+            && self.status.is_none()
             && self.group.is_none()
             && self.priority_cap.is_none()
             && !self.ready_only
@@ -23,6 +59,7 @@ impl Filters {
             && self.text.is_none()
     }
 
+    #[allow(dead_code)] // exercised in tests; remains for future callers
     pub fn clear(&mut self) {
         *self = Self::default();
     }
@@ -38,6 +75,7 @@ pub fn filtered_indices(tasks: &[Task], f: &Filters) -> Vec<usize> {
     tasks
         .iter()
         .enumerate()
+        .filter(|(_, t)| f.view.allows_status(&t.status))
         .filter(|(_, t)| f.status.as_deref().is_none_or(|s| t.status == s))
         .filter(|(_, t)| {
             f.group
@@ -97,10 +135,50 @@ mod tests {
     }
 
     #[test]
-    fn default_passes_everything() {
-        let tasks = vec![task(1, "a", "open", 2, vec![]), task(2, "b", "done", 0, vec![])];
+    fn default_excludes_done_and_backlog() {
+        let tasks = vec![
+            task(1, "a", "open", 2, vec![]),
+            task(2, "b", "done", 0, vec![]),
+            task(3, "c", "backlog", 0, vec![]),
+            task(4, "d", "in_progress", 0, vec![]),
+        ];
         let got = filtered_indices(&tasks, &Filters::default());
-        assert_eq!(got, vec![0, 1]);
+        assert_eq!(got, vec![0, 3]);
+    }
+
+    #[test]
+    fn done_view_shows_only_done() {
+        let tasks = vec![
+            task(1, "a", "open", 2, vec![]),
+            task(2, "b", "done", 0, vec![]),
+            task(3, "c", "backlog", 0, vec![]),
+        ];
+        let f = Filters {
+            view: ViewMode::Done,
+            ..Default::default()
+        };
+        assert_eq!(filtered_indices(&tasks, &f), vec![1]);
+    }
+
+    #[test]
+    fn backlog_view_shows_only_backlog() {
+        let tasks = vec![
+            task(1, "a", "open", 2, vec![]),
+            task(2, "b", "done", 0, vec![]),
+            task(3, "c", "backlog", 0, vec![]),
+        ];
+        let f = Filters {
+            view: ViewMode::Backlog,
+            ..Default::default()
+        };
+        assert_eq!(filtered_indices(&tasks, &f), vec![2]);
+    }
+
+    #[test]
+    fn view_mode_next_cycles_three_states() {
+        assert_eq!(ViewMode::Active.next(), ViewMode::Done);
+        assert_eq!(ViewMode::Done.next(), ViewMode::Backlog);
+        assert_eq!(ViewMode::Backlog.next(), ViewMode::Active);
     }
 
     #[test]
@@ -114,7 +192,29 @@ mod tests {
             status: Some("open".into()),
             ..Default::default()
         };
+        // Active view includes open + in_progress; status filter narrows to open.
         assert_eq!(filtered_indices(&tasks, &f), vec![0]);
+    }
+
+    #[test]
+    fn status_filter_done_requires_done_view() {
+        // status="done" alone returns nothing because the default Active view
+        // already excludes done; user must Tab to the done view first.
+        let tasks = vec![
+            task(1, "a", "open", 2, vec![]),
+            task(2, "b", "done", 2, vec![]),
+        ];
+        let f = Filters {
+            status: Some("done".into()),
+            ..Default::default()
+        };
+        assert_eq!(filtered_indices(&tasks, &f), Vec::<usize>::new());
+        let f = Filters {
+            view: ViewMode::Done,
+            status: Some("done".into()),
+            ..Default::default()
+        };
+        assert_eq!(filtered_indices(&tasks, &f), vec![1]);
     }
 
     #[test]
@@ -129,6 +229,18 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(filtered_indices(&tasks, &f), vec![0, 1]);
+    }
+
+    #[test]
+    fn ready_only_in_done_view_returns_nothing() {
+        // ready_only requires status == "open"; the done view rules that out.
+        let tasks = vec![task(1, "a", "done", 2, vec![])];
+        let f = Filters {
+            view: ViewMode::Done,
+            ready_only: true,
+            ..Default::default()
+        };
+        assert_eq!(filtered_indices(&tasks, &f), Vec::<usize>::new());
     }
 
     #[test]

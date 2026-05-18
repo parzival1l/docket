@@ -26,13 +26,13 @@ pub const COMMAND_REGISTRY: &[Binding] = &[
     Binding { keys: "j/k", label: "nav", scope: Scope::List, footer: true },
     Binding { keys: "g/G", label: "top/bottom", scope: Scope::List, footer: false },
     Binding { keys: "l", label: "detail", scope: Scope::List, footer: true },
+    Binding { keys: "Tab", label: "view", scope: Scope::List, footer: true },
     Binding { keys: "n", label: "new", scope: Scope::List, footer: true },
     Binding { keys: "e", label: "edit", scope: Scope::List, footer: true },
     Binding { keys: "s", label: "cycle status", scope: Scope::List, footer: true },
     Binding { keys: "d", label: "done", scope: Scope::List, footer: true },
     Binding { keys: "x", label: "delete", scope: Scope::List, footer: true },
-    Binding { keys: "S", label: "start", scope: Scope::List, footer: true },
-    Binding { keys: "Ctrl+S", label: "start (tmux)", scope: Scope::List, footer: false },
+    Binding { keys: "Ctrl+S", label: "start", scope: Scope::List, footer: true },
     Binding { keys: "O", label: "open session", scope: Scope::Global, footer: false },
     Binding { keys: "j/k", label: "nav", scope: Scope::SessionPicker, footer: true },
     Binding { keys: "Enter", label: "open", scope: Scope::SessionPicker, footer: true },
@@ -40,12 +40,11 @@ pub const COMMAND_REGISTRY: &[Binding] = &[
     Binding { keys: "f s", label: "filter status", scope: Scope::List, footer: false },
     Binding { keys: "f g", label: "filter group", scope: Scope::List, footer: false },
     Binding { keys: "f p", label: "filter priority", scope: Scope::List, footer: false },
-    Binding { keys: "f r", label: "ready", scope: Scope::List, footer: true },
     Binding { keys: "f b", label: "blocked", scope: Scope::List, footer: false },
-    Binding { keys: "f c", label: "clear filters", scope: Scope::List, footer: true },
     Binding { keys: "h", label: "list", scope: Scope::Detail, footer: true },
     Binding { keys: "e", label: "edit", scope: Scope::Detail, footer: true },
-    Binding { keys: "PgUp/PgDn", label: "scroll", scope: Scope::Detail, footer: true },
+    Binding { keys: "j/k PgUp/PgDn", label: "scroll", scope: Scope::Detail, footer: true },
+    Binding { keys: "g/G", label: "top/bottom", scope: Scope::Detail, footer: false },
     Binding { keys: "?/Esc", label: "close help", scope: Scope::Help, footer: true },
     Binding { keys: "Enter", label: "apply", scope: Scope::FilterPrompt, footer: true },
     Binding { keys: "Esc", label: "cancel", scope: Scope::FilterPrompt, footer: true },
@@ -95,10 +94,13 @@ mod tests {
         assert!(labels.contains(&"help"));
         assert!(labels.contains(&"nav"));
         assert!(labels.contains(&"detail"));
-        assert!(labels.contains(&"clear filters"));
+        assert!(labels.contains(&"view"));
         assert!(labels.contains(&"cycle status"));
         assert!(labels.contains(&"done"));
         assert!(labels.contains(&"delete"));
+        assert!(labels.contains(&"start"));
+        assert!(!labels.contains(&"clear filters"));
+        assert!(!labels.contains(&"ready"));
     }
 
     #[test]
@@ -144,12 +146,33 @@ mod tests {
 
     #[test]
     fn registry_contains_start_keys() {
-        assert!(COMMAND_REGISTRY
+        // Shift+S was removed; Ctrl+S is the only start binding and is shown
+        // in the footer.
+        assert!(!COMMAND_REGISTRY
             .iter()
             .any(|b| b.keys == "S" && b.scope == Scope::List));
-        assert!(COMMAND_REGISTRY
+        let start = COMMAND_REGISTRY
             .iter()
-            .any(|b| b.keys == "Ctrl+S" && b.scope == Scope::List));
+            .find(|b| b.keys == "Ctrl+S" && b.scope == Scope::List)
+            .expect("Ctrl+S start binding must exist");
+        assert!(start.footer, "Ctrl+S start must appear in the footer");
+        assert_eq!(start.label, "start");
+    }
+
+    #[test]
+    fn registry_contains_tab_view_binding() {
+        let tab = COMMAND_REGISTRY
+            .iter()
+            .find(|b| b.keys == "Tab" && b.scope == Scope::List)
+            .expect("Tab view-cycle binding must exist");
+        assert!(tab.footer);
+        assert_eq!(tab.label, "view");
+    }
+
+    #[test]
+    fn registry_no_longer_contains_f_r_or_f_c() {
+        assert!(!COMMAND_REGISTRY.iter().any(|b| b.keys == "f r"));
+        assert!(!COMMAND_REGISTRY.iter().any(|b| b.keys == "f c"));
     }
 
     #[test]

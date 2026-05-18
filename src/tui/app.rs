@@ -47,6 +47,9 @@ pub struct App {
     pub should_quit: bool,
     pub pending_start: Option<StartRequest>,
     pub pending_open_session: Option<OpenSessionRequest>,
+    /// Vertical scroll offset for the detail pane, in lines. Reset to zero
+    /// whenever the selected task changes (cursor move, view cycle, reload).
+    pub detail_scroll: u16,
 }
 
 impl App {
@@ -64,12 +67,14 @@ impl App {
             should_quit: false,
             pending_start: None,
             pending_open_session: None,
+            detail_scroll: 0,
         })
     }
 
     pub fn reload(&mut self) -> Result<()> {
         self.tasks = load_all_tasks(&self.conn)?;
         self.clamp_cursor();
+        self.detail_scroll = 0;
         Ok(())
     }
 
@@ -119,22 +124,11 @@ impl App {
                             .unwrap_or_default(),
                     };
                 }
-                KeyCode::Char('r') => {
-                    self.filters.ready_only = !self.filters.ready_only;
-                    if self.filters.ready_only {
-                        self.filters.blocked_only = false;
-                    }
-                    self.clamp_cursor();
-                }
                 KeyCode::Char('b') => {
                     self.filters.blocked_only = !self.filters.blocked_only;
                     if self.filters.blocked_only {
                         self.filters.ready_only = false;
                     }
-                    self.clamp_cursor();
-                }
-                KeyCode::Char('c') => {
-                    self.filters.clear();
                     self.clamp_cursor();
                 }
                 _ => {}
@@ -169,6 +163,14 @@ impl App {
             (KeyCode::Char('s'), m) if m.contains(KeyModifiers::CONTROL) => {
                 if self.focus == Pane::List {
                     self.request_start(TmuxDelivery::ForceSpawn);
+                }
+                return;
+            }
+            (KeyCode::Tab, _) => {
+                if self.focus == Pane::List {
+                    self.filters.view = self.filters.view.next();
+                    self.clamp_cursor();
+                    self.detail_scroll = 0;
                 }
                 return;
             }
@@ -276,16 +278,23 @@ impl App {
             KeyCode::Char('j') | KeyCode::Down => {
                 if visible_len > 0 && self.cursor + 1 < visible_len {
                     self.cursor += 1;
+                    self.detail_scroll = 0;
                 }
             }
             KeyCode::Char('k') | KeyCode::Up => {
+                let prev = self.cursor;
                 self.cursor = self.cursor.saturating_sub(1);
+                if self.cursor != prev {
+                    self.detail_scroll = 0;
+                }
             }
             KeyCode::Char('g') => {
                 self.cursor = 0;
+                self.detail_scroll = 0;
             }
             KeyCode::Char('G') => {
                 self.cursor = visible_len.saturating_sub(1);
+                self.detail_scroll = 0;
             }
             KeyCode::Char('l') | KeyCode::Right => {
                 self.focus = Pane::Detail;
@@ -307,9 +316,6 @@ impl App {
             }
             KeyCode::Char('e') => {
                 self.open_edit_form();
-            }
-            KeyCode::Char('S') => {
-                self.request_start(TmuxDelivery::Off);
             }
             _ => {}
         }
@@ -359,12 +365,34 @@ impl App {
     }
 
     fn handle_detail(&mut self, key: KeyEvent) {
+        // Page size for PgUp/PgDn; the real viewport height isn't known until
+        // render, so we use a sane default. Render clamps the offset so any
+        // overshoot self-corrects on the next frame.
+        const PAGE: u16 = 10;
         match key.code {
             KeyCode::Char('h') | KeyCode::Left => {
                 self.focus = Pane::List;
             }
             KeyCode::Char('e') => {
                 self.open_edit_form();
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.detail_scroll = self.detail_scroll.saturating_add(1);
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.detail_scroll = self.detail_scroll.saturating_sub(1);
+            }
+            KeyCode::PageDown => {
+                self.detail_scroll = self.detail_scroll.saturating_add(PAGE);
+            }
+            KeyCode::PageUp => {
+                self.detail_scroll = self.detail_scroll.saturating_sub(PAGE);
+            }
+            KeyCode::Char('g') => {
+                self.detail_scroll = 0;
+            }
+            KeyCode::Char('G') => {
+                self.detail_scroll = u16::MAX;
             }
             _ => {}
         }
@@ -663,7 +691,7 @@ impl App {
         }
     }
 
-    pub fn render(&self, frame: &mut Frame) {
+    pub fn render(&mut self, frame: &mut Frame) {
         match &self.screen {
             Screen::Edit(state) => crate::tui::screens::edit::render(frame, state),
             _ => {
@@ -707,6 +735,7 @@ mod tests {
             should_quit: false,
             pending_start: None,
             pending_open_session: None,
+            detail_scroll: 0,
         }
     }
 
@@ -838,22 +867,80 @@ mod tests {
     }
 
     #[test]
+    fn pgdn_in_detail_increments_scroll() {
+        let mut app = mem_app_with(&[("a", "open", 2)]);
+        app.handle_key(key(KeyCode::Char('l')));
+        app.handle_key(key(KeyCode::PageDown));
+        assert!(
+            app.detail_scroll > 0,
+            "PgDn in detail pane must advance detail_scroll"
+        );
+    }
+
+    #[test]
+    fn pgup_in_detail_decrements_scroll_saturating() {
+        let mut app = mem_app_with(&[("a", "open", 2)]);
+        app.handle_key(key(KeyCode::Char('l')));
+        app.handle_key(key(KeyCode::PageDown));
+        app.handle_key(key(KeyCode::PageDown));
+        app.handle_key(key(KeyCode::PageUp));
+        app.handle_key(key(KeyCode::PageUp));
+        app.handle_key(key(KeyCode::PageUp));
+        assert_eq!(app.detail_scroll, 0);
+    }
+
+    #[test]
+    fn j_k_in_detail_pane_scrolls_one_line() {
+        let mut app = mem_app_with(&[("a", "open", 2)]);
+        app.handle_key(key(KeyCode::Char('l')));
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.detail_scroll, 1);
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.detail_scroll, 2);
+        app.handle_key(key(KeyCode::Char('k')));
+        assert_eq!(app.detail_scroll, 1);
+    }
+
+    #[test]
+    fn g_in_detail_resets_scroll_to_zero() {
+        let mut app = mem_app_with(&[("a", "open", 2)]);
+        app.handle_key(key(KeyCode::Char('l')));
+        app.handle_key(key(KeyCode::PageDown));
+        app.handle_key(key(KeyCode::Char('g')));
+        assert_eq!(app.detail_scroll, 0);
+    }
+
+    #[test]
+    fn cursor_change_resets_detail_scroll() {
+        let mut app = mem_app_with(&[("a", "open", 2), ("b", "open", 2)]);
+        app.handle_key(key(KeyCode::Char('l')));
+        app.handle_key(key(KeyCode::PageDown));
+        assert!(app.detail_scroll > 0);
+        app.handle_key(key(KeyCode::Char('h'))); // back to list
+        app.handle_key(key(KeyCode::Char('j'))); // move cursor down
+        assert_eq!(
+            app.detail_scroll, 0,
+            "Moving the cursor must reset detail scroll so the new task starts at the top"
+        );
+    }
+
+    #[test]
+    fn h_in_detail_does_not_scroll() {
+        // Regression guard: h is "back to list", not "scroll left".
+        let mut app = mem_app_with(&[("a", "open", 2)]);
+        app.handle_key(key(KeyCode::Char('l')));
+        app.handle_key(key(KeyCode::Char('h')));
+        assert_eq!(app.focus, Pane::List);
+        assert_eq!(app.detail_scroll, 0);
+    }
+
+    #[test]
     fn l_focuses_detail_and_h_focuses_list() {
         let mut app = mem_app_with(&[("a", "open", 2)]);
         app.handle_key(key(KeyCode::Char('l')));
         assert_eq!(app.focus, Pane::Detail);
         app.handle_key(key(KeyCode::Char('h')));
         assert_eq!(app.focus, Pane::List);
-    }
-
-    #[test]
-    fn f_then_r_toggles_ready_filter() {
-        let mut app = mem_app_with(&[("a", "open", 2)]);
-        app.handle_key(key(KeyCode::Char('f')));
-        assert_eq!(app.pending_chord, Some('f'));
-        app.handle_key(key(KeyCode::Char('r')));
-        assert!(app.filters.ready_only);
-        assert!(app.pending_chord.is_none());
     }
 
     #[test]
@@ -867,13 +954,49 @@ mod tests {
     }
 
     #[test]
-    fn f_then_c_clears_all_filters() {
-        let mut app = mem_app_with(&[("a", "open", 2)]);
-        app.filters.ready_only = true;
-        app.filters.status = Some("open".into());
-        app.handle_key(key(KeyCode::Char('f')));
-        app.handle_key(key(KeyCode::Char('c')));
-        assert!(app.filters.is_default());
+    fn tab_cycles_view_active_done_backlog_active() {
+        use crate::tui::filters::ViewMode;
+        let mut app = mem_app();
+        assert_eq!(app.filters.view, ViewMode::Active);
+        app.handle_key(key(KeyCode::Tab));
+        assert_eq!(app.filters.view, ViewMode::Done);
+        app.handle_key(key(KeyCode::Tab));
+        assert_eq!(app.filters.view, ViewMode::Backlog);
+        app.handle_key(key(KeyCode::Tab));
+        assert_eq!(app.filters.view, ViewMode::Active);
+    }
+
+    #[test]
+    fn default_view_hides_backlog_and_shows_in_progress() {
+        let app = mem_app_with(&[
+            ("active", "open", 2),
+            ("running", "in_progress", 2),
+            ("shipped", "done", 2),
+            ("later", "backlog", 2),
+        ]);
+        let titles: Vec<&str> = app
+            .visible_indices()
+            .iter()
+            .map(|i| app.tasks[*i].title.as_str())
+            .collect();
+        assert_eq!(titles, vec!["active", "running"]);
+    }
+
+    #[test]
+    fn backlog_view_after_two_tabs_shows_only_backlog() {
+        let mut app = mem_app_with(&[
+            ("active", "open", 2),
+            ("shipped", "done", 2),
+            ("later", "backlog", 2),
+        ]);
+        app.handle_key(key(KeyCode::Tab));
+        app.handle_key(key(KeyCode::Tab));
+        let titles: Vec<&str> = app
+            .visible_indices()
+            .iter()
+            .map(|i| app.tasks[*i].title.as_str())
+            .collect();
+        assert_eq!(titles, vec!["later"]);
     }
 
     #[test]
@@ -940,10 +1063,17 @@ mod tests {
 
     #[test]
     fn applying_filter_clamps_out_of_range_cursor() {
-        let mut app = mem_app_with(&[("a", "open", 2), ("b", "done", 2)]);
+        // Default view already excludes "done"; cycling to backlog leaves a
+        // single visible task ("b" status=backlog) so a cursor parked at the
+        // second slot must clamp back to 0.
+        let mut app = mem_app_with(&[("a", "open", 2), ("b", "backlog", 2)]);
         app.cursor = 1;
-        app.handle_key(key(KeyCode::Char('f')));
-        app.handle_key(key(KeyCode::Char('r')));
+        // Active view only shows "a" — cursor already needs clamping.
+        app.clamp_cursor();
+        app.cursor = 1;
+        // Tab × 2 → backlog view, "b" is the only entry.
+        app.handle_key(key(KeyCode::Tab));
+        app.handle_key(key(KeyCode::Tab));
         assert_eq!(app.cursor, 0);
     }
 
@@ -959,32 +1089,53 @@ mod tests {
         assert!(app.selected_task().is_none());
     }
 
+    /// Look up a task's status by title — tests that mutate status often
+    /// push a task out of the current view, so cursor-relative access
+    /// returns None.
+    fn status_of(app: &App, title: &str) -> String {
+        app.tasks
+            .iter()
+            .find(|t| t.title == title)
+            .map(|t| t.status.clone())
+            .unwrap_or_else(|| format!("(no task titled {})", title))
+    }
+
     #[test]
     fn s_cycles_open_to_in_progress() {
         let mut app = mem_app_with(&[("a", "open", 2)]);
         app.handle_key(key(KeyCode::Char('s')));
-        assert_eq!(app.selected_task().unwrap().status, "in_progress");
+        assert_eq!(status_of(&app, "a"), "in_progress");
     }
 
     #[test]
     fn s_cycles_in_progress_to_done() {
         let mut app = mem_app_with(&[("a", "in_progress", 2)]);
         app.handle_key(key(KeyCode::Char('s')));
-        assert_eq!(app.selected_task().unwrap().status, "done");
+        assert_eq!(status_of(&app, "a"), "done");
     }
 
     #[test]
     fn s_cycles_done_back_to_open() {
+        // "done" sits in the Done view, not Active. Tab once so the cursor
+        // can land on it, then `s` cycles it forward to open.
         let mut app = mem_app_with(&[("a", "done", 2)]);
+        app.handle_key(key(KeyCode::Tab));
         app.handle_key(key(KeyCode::Char('s')));
-        assert_eq!(app.selected_task().unwrap().status, "open");
+        assert_eq!(status_of(&app, "a"), "open");
     }
 
     #[test]
     fn s_cycles_custom_status_to_open() {
-        let mut app = mem_app_with(&[("a", "wontfix", 2)]);
-        app.handle_key(key(KeyCode::Char('s')));
-        assert_eq!(app.selected_task().unwrap().status, "open");
+        // "wontfix" doesn't belong to any of the three views, so the cursor
+        // can't reach it from the TUI today; this exercises the underlying
+        // next_status() mapping directly via set_status.
+        let mut app = mem_app_with(&[("a", "open", 2)]);
+        let id = app.selected_task().unwrap().id;
+        crate::db::set_status(&app.conn, id, "wontfix").unwrap();
+        app.reload().unwrap();
+        // Manually invoke the cycle path by hopping into Done view (still
+        // doesn't include wontfix). Instead, assert next_status mapping:
+        assert_eq!(next_status("wontfix"), "open");
     }
 
     #[test]
@@ -1012,21 +1163,22 @@ mod tests {
     fn d_marks_open_task_done() {
         let mut app = mem_app_with(&[("a", "open", 2)]);
         app.handle_key(key(KeyCode::Char('d')));
-        assert_eq!(app.selected_task().unwrap().status, "done");
+        assert_eq!(status_of(&app, "a"), "done");
     }
 
     #[test]
     fn d_marks_in_progress_task_done() {
         let mut app = mem_app_with(&[("a", "in_progress", 2)]);
         app.handle_key(key(KeyCode::Char('d')));
-        assert_eq!(app.selected_task().unwrap().status, "done");
+        assert_eq!(status_of(&app, "a"), "done");
     }
 
     #[test]
     fn d_on_already_done_task_stays_done() {
         let mut app = mem_app_with(&[("a", "done", 2)]);
+        app.handle_key(key(KeyCode::Tab)); // hop to Done view to reach the task
         app.handle_key(key(KeyCode::Char('d')));
-        assert_eq!(app.selected_task().unwrap().status, "done");
+        assert_eq!(status_of(&app, "a"), "done");
     }
 
     #[test]
@@ -1375,23 +1527,11 @@ mod tests {
     }
 
     #[test]
-    fn capital_s_sets_pending_start_no_tmux_and_quits() {
+    fn capital_s_no_longer_starts_task() {
+        // Shift+S used to spawn a start; users typed it accidentally. Ctrl+S
+        // is now the only start key, so plain Shift+S must be inert in list
+        // scope.
         let mut app = mem_app_with(&[("a", "open", 2)]);
-        let id = app.selected_task().unwrap().id;
-        app.handle_key(key_with(KeyCode::Char('S'), KeyModifiers::SHIFT));
-        assert!(app.should_quit);
-        assert_eq!(
-            app.pending_start,
-            Some(StartRequest {
-                id,
-                delivery: TmuxDelivery::Off
-            })
-        );
-    }
-
-    #[test]
-    fn capital_s_on_empty_list_is_a_noop() {
-        let mut app = mem_app();
         app.handle_key(key_with(KeyCode::Char('S'), KeyModifiers::SHIFT));
         assert!(!app.should_quit);
         assert!(app.pending_start.is_none());
@@ -1622,7 +1762,7 @@ mod tests {
     fn main_screen_renders_top_bar_and_footer() {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
-        let app = mem_app_with(&[("hello", "open", 2)]);
+        let mut app = mem_app_with(&[("hello", "open", 2)]);
         let backend = TestBackend::new(100, 20);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|f| app.render(f)).unwrap();
@@ -1636,6 +1776,28 @@ mod tests {
         assert!(s.contains("docket"));
         assert!(s.contains("hello"));
         assert!(s.contains("quit"));
+        assert!(s.contains("active"), "top bar should show current view chip");
+    }
+
+    #[test]
+    fn top_bar_chip_updates_after_tab_cycles_to_backlog() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut app = mem_app_with(&[("hi", "backlog", 2)]);
+        app.handle_key(key(KeyCode::Tab));
+        app.handle_key(key(KeyCode::Tab));
+        let backend = TestBackend::new(100, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        let s: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(s.contains("backlog"));
     }
 
     #[test]
@@ -2046,6 +2208,69 @@ mod tests {
             "test sessions have no transcript on disk — picker should say so; got:\n{}",
             s
         );
+    }
+
+    #[test]
+    fn task_detail_renders_body_without_raw_hash_markers() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut app = mem_app();
+        // Seed a task with markdown in body. The detail pane used to print
+        // literal `## body` and the body's own `##` lines verbatim; now they
+        // should render as styled section text without hash characters.
+        let id = insert_task(
+            &app.conn,
+            NewTask {
+                title: "alpha",
+                body: Some("## Setup\n\n- step one with **bold**\n- step two"),
+                acceptance: Some("- pass `cargo test`"),
+                deps_json: None,
+                priority: 2,
+                group_id: None,
+                kind: "feature",
+                status: "open",
+            },
+        )
+        .unwrap();
+        app.reload().unwrap();
+        let _ = id;
+
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        let s: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<Vec<_>>()
+            .join("");
+        // No literal `## body` / `## acceptance` headers anymore — they were
+        // the eyesore the markdown rewrite is meant to fix.
+        assert!(
+            !s.contains("## body"),
+            "detail should not show literal `## body`; got:\n{}",
+            s
+        );
+        assert!(
+            !s.contains("## acceptance"),
+            "detail should not show literal `## acceptance`; got:\n{}",
+            s
+        );
+        assert!(
+            !s.contains("## Setup"),
+            "user-authored `## Setup` should be rendered as a heading, not raw markdown; got:\n{}",
+            s
+        );
+        // The actual content survives.
+        assert!(s.contains("Setup"));
+        assert!(s.contains("step one"));
+        assert!(s.contains("step two"));
+        // Bullet glyph replaces the leading `-`.
+        assert!(s.contains("•"), "bullets should render as `•`; got:\n{}", s);
+        // Bold marker is consumed.
+        assert!(!s.contains("**"));
     }
 
     #[test]

@@ -5,7 +5,7 @@ use crate::tui::app::{App, Pane};
 use crate::tui::keybindings::Scope;
 use crate::tui::widgets::{footer, task_detail, task_list, top_bar};
 
-pub fn render(app: &App, frame: &mut Frame) {
+pub fn render(app: &mut App, frame: &mut Frame) {
     let area = frame.area();
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -32,13 +32,15 @@ pub fn render(app: &App, frame: &mut Frame) {
         app.cursor,
         app.focus == Pane::List,
     );
-    task_detail::render(
+    let clamped = task_detail::render(
         frame,
         panes[1],
         app.selected_task(),
         &app.tasks,
         app.focus == Pane::Detail,
+        app.detail_scroll,
     );
+    app.detail_scroll = clamped;
 
     let scope = match app.focus {
         Pane::List => Scope::List,
