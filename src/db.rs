@@ -44,13 +44,53 @@ CREATE INDEX IF NOT EXISTS idx_agent_sessions_task ON agent_sessions(task_id);
 pub fn find_repo_root(start: &Path) -> Option<PathBuf> {
     let mut p = start.to_path_buf();
     loop {
-        if p.join(".git").exists() {
+        let dot_git = p.join(".git");
+        if dot_git.is_dir() {
             return Some(p);
+        }
+        if dot_git.is_file() {
+            // Linked worktree: `.git` is a pointer file `gitdir: <admin dir>`.
+            // The admin dir (`<main>/.git/worktrees/<name>`) contains a
+            // `commondir` entry that resolves back to the main `.git`. We
+            // return the parent of that main `.git`, so every worktree of a
+            // given repo shares the same `.docket/` location.
+            return resolve_linked_worktree_root(&dot_git);
         }
         if !p.pop() {
             return None;
         }
     }
+}
+
+fn resolve_linked_worktree_root(git_file: &Path) -> Option<PathBuf> {
+    let content = std::fs::read_to_string(git_file).ok()?;
+    let gitdir_raw = content
+        .lines()
+        .find_map(|l| l.strip_prefix("gitdir:"))?
+        .trim();
+    let gitdir = {
+        let g = Path::new(gitdir_raw);
+        if g.is_absolute() {
+            g.to_path_buf()
+        } else {
+            git_file.parent()?.join(g)
+        }
+    };
+    let commondir_file = gitdir.join("commondir");
+    let main_git = if commondir_file.is_file() {
+        let raw = std::fs::read_to_string(&commondir_file).ok()?;
+        let rel = raw.trim();
+        let c = Path::new(rel);
+        if c.is_absolute() {
+            c.to_path_buf()
+        } else {
+            gitdir.join(c)
+        }
+    } else {
+        gitdir
+    };
+    let main_git = main_git.canonicalize().ok()?;
+    main_git.parent().map(|p| p.to_path_buf())
 }
 
 pub fn docket_dir() -> Result<PathBuf> {
@@ -171,6 +211,50 @@ pub fn link_session(conn: &Connection, task_id: i64, session_id: &str) -> Result
         params![session_id, task_id, now()],
     )?;
     Ok(())
+}
+
+/// Rewrite a session's id without losing its task linkage or `linked_at`.
+/// If `new_session_id` already belongs to a different row, that row is
+/// dropped first so the PK doesn't collide (the new id wins). No-op if
+/// `old_session_id == new_session_id`.
+pub fn relink_session(
+    conn: &Connection,
+    old_session_id: &str,
+    new_session_id: &str,
+) -> Result<usize> {
+    if old_session_id == new_session_id {
+        return Ok(0);
+    }
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "DELETE FROM agent_sessions WHERE session_id = ?1",
+        params![new_session_id],
+    )?;
+    let n = tx.execute(
+        "UPDATE agent_sessions SET session_id = ?1 WHERE session_id = ?2",
+        params![new_session_id, old_session_id],
+    )?;
+    tx.commit()?;
+    Ok(n)
+}
+
+/// All currently-linked sessions whose id looks like a `docket start --tmux`
+/// placeholder (`docket-T-N-<ts>`) — i.e. predates the `--session-id` fix
+/// and needs reconciling.
+pub fn placeholder_session_links(conn: &Connection) -> Result<Vec<(String, i64)>> {
+    let mut stmt = conn.prepare(
+        "SELECT session_id, task_id FROM agent_sessions
+         WHERE session_id LIKE 'docket-T-%'
+         ORDER BY linked_at",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
 }
 
 /// Remove the session link entirely. Returns rows deleted (0 if not linked).

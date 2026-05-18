@@ -39,8 +39,8 @@ pub fn run(id: String, delivery: TmuxDelivery) -> Result<()> {
         }
         TmuxDelivery::Auto | TmuxDelivery::ForceSpawn => {
             let force_spawn = matches!(delivery, TmuxDelivery::ForceSpawn);
-            let session_name = deliver_via_tmux_session(t.id, &prompt, force_spawn)?;
-            link_session(&conn, t.id, &session_name)?;
+            let session_uuid = deliver_via_tmux_session(t.id, &prompt, force_spawn)?;
+            link_session(&conn, t.id, &session_uuid)?;
         }
     }
 
@@ -56,16 +56,49 @@ fn mark_in_progress(conn: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
+/// Spawn a fresh tmux session whose only job is to run `claude --session-id
+/// <uuid> < <prompt>`. Returns the **claude session uuid** (NOT the tmux
+/// session name) — that's what callers link to the task so the row resolves
+/// against `~/.claude/projects/<cwd>/<uuid>.jsonl` later. The tmux session
+/// name is internal; it only exists so `tmux attach` has a handle.
 fn deliver_via_tmux_session(id: i64, prompt: &str, force_spawn: bool) -> Result<String> {
     let ts = Utc::now().timestamp_nanos_opt().unwrap_or(0);
     let prompt_path = std::env::temp_dir().join(format!("docket-{}-{}.md", fmt_id(id), ts));
     fs::write(&prompt_path, prompt)
         .with_context(|| format!("failed to write prompt tempfile {}", prompt_path.display()))?;
 
-    let session_name = format!("docket-{}-{}", fmt_id(id), ts);
-    let cmd = format!("claude < {}", prompt_path.display());
-    spawn_tmux_session(&session_name, &cmd, force_spawn)?;
-    Ok(session_name)
+    let session_uuid = mint_uuid_v4()?;
+    let tmux_name = format!("docket-{}-{}", fmt_id(id), ts);
+    let cmd = format!(
+        "claude --session-id {} < {}",
+        session_uuid,
+        prompt_path.display()
+    );
+    spawn_tmux_session(&tmux_name, &cmd, force_spawn)?;
+    Ok(session_uuid)
+}
+
+/// Mint a RFC 4122 v4 UUID from `/dev/urandom`. Used to pre-allocate the
+/// session id we hand to `claude --session-id`, so the docket row always
+/// matches the transcript filename Claude will write.
+fn mint_uuid_v4() -> Result<String> {
+    use std::io::Read;
+    let mut bytes = [0u8; 16];
+    let mut f = std::fs::File::open("/dev/urandom")
+        .context("open /dev/urandom to mint session id")?;
+    f.read_exact(&mut bytes)
+        .context("read 16 bytes from /dev/urandom")?;
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let h: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
+    Ok(format!(
+        "{}-{}-{}-{}-{}",
+        &h[0..8],
+        &h[8..12],
+        &h[12..16],
+        &h[16..20],
+        &h[20..32]
+    ))
 }
 
 /// Create a detached tmux session named `session_name`, send `command` into

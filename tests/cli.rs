@@ -865,6 +865,103 @@ fn group_close_missing_group_errors() {
         .failure();
 }
 
+// ---------- worktrees (T-13) ----------
+
+/// A handle to a fake git worktree rooted at `path`, sharing the underlying
+/// "repo" with `main` via a `.git` pointer file and a `commondir` entry.
+struct Worktree {
+    path: PathBuf,
+}
+
+impl Worktree {
+    fn cmd(&self) -> Command {
+        let mut c = Command::cargo_bin("docket").unwrap();
+        c.current_dir(&self.path);
+        c
+    }
+    fn run(&self, args: &[&str]) -> Output {
+        self.cmd().args(args).output().expect("spawn docket")
+    }
+}
+
+/// Build a fake worktree of `main` named `name`, placed at `<main>/wt-<name>/`.
+///
+/// Mimics the on-disk shape git produces:
+///   - `<main>/.git/worktrees/<name>/commondir` -> `../..` (back to `<main>/.git`)
+///   - `<wt>/.git` is a regular file: `gitdir: <abs path to admin dir>`
+fn make_worktree(main: &Repo, name: &str) -> Worktree {
+    let wt_path = main.path().join(format!("wt-{}", name));
+    fs::create_dir_all(&wt_path).unwrap();
+    let admin = main.path().join(".git").join("worktrees").join(name);
+    fs::create_dir_all(&admin).unwrap();
+    fs::write(admin.join("commondir"), "../..\n").unwrap();
+    let gitfile = format!("gitdir: {}\n", admin.display());
+    fs::write(wt_path.join(".git"), gitfile).unwrap();
+    Worktree { path: wt_path }
+}
+
+#[test]
+fn task_added_in_worktree_is_visible_from_sibling_worktree() {
+    let main = Repo::new();
+    let wt_a = make_worktree(&main, "alpha");
+    let wt_b = make_worktree(&main, "beta");
+
+    let add_out = wt_a.run(&["add", "shared task"]);
+    assert!(
+        add_out.status.success(),
+        "add in worktree A failed: {}",
+        stderr_of(&add_out)
+    );
+    let id = stdout_of(&add_out)
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+
+    let ls_out = wt_b.run(&["ls"]);
+    assert!(
+        ls_out.status.success(),
+        "ls in worktree B failed: {}",
+        stderr_of(&ls_out)
+    );
+    let s = stdout_of(&ls_out);
+    assert!(
+        s.contains(&id),
+        "worktree B should see worktree A's task {}; got:\n{}",
+        id,
+        s
+    );
+}
+
+#[test]
+fn status_change_in_one_worktree_is_visible_from_another() {
+    let main = Repo::new();
+    let wt_a = make_worktree(&main, "alpha");
+    let wt_b = make_worktree(&main, "beta");
+
+    let id = main.add_simple("status hop");
+
+    let st = wt_a.run(&["status", &id, "in_progress"]);
+    assert!(
+        st.status.success(),
+        "status change in worktree A failed: {}",
+        stderr_of(&st)
+    );
+
+    let show_out = wt_b.run(&["show", &id, "--json"]);
+    assert!(
+        show_out.status.success(),
+        "show in worktree B failed: {}",
+        stderr_of(&show_out)
+    );
+    let j: serde_json::Value = serde_json::from_slice(&show_out.stdout)
+        .expect("show --json must emit valid JSON");
+    assert_eq!(
+        j["status"], "in_progress",
+        "worktree B should see status change made in worktree A"
+    );
+}
+
 // ---------- isolation guard ----------
 
 // Sanity check that two repos created in the same test really don't share state.

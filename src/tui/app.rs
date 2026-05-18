@@ -404,6 +404,11 @@ impl App {
             },
         };
 
+        let (orig_sessions, new_sessions) = match mode {
+            EditMode::Edit { .. } => (state.orig_sessions_list(), state.sessions_list()),
+            EditMode::Add => (Vec::new(), Vec::new()),
+        };
+
         let result = match mode {
             EditMode::Add => crate::db::insert_task(
                 &self.conn,
@@ -436,6 +441,15 @@ impl App {
 
         match result {
             Ok(id) => {
+                if let EditMode::Edit { id: tid } = mode {
+                    if let Err(e) = self.sync_session_links(tid, &orig_sessions, &new_sessions) {
+                        if let Screen::Edit(state) = &mut self.screen {
+                            state.error = Some(format!("sessions: {}", e));
+                        }
+                        let _ = self.reload();
+                        return;
+                    }
+                }
                 let _ = self.reload();
                 self.preserve_cursor_on(id);
                 self.screen = Screen::Main;
@@ -446,6 +460,30 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Apply additions and removals so the `agent_sessions` table reflects
+    /// the user's edited list. Adds are upserts (`link_session` moves a
+    /// session id from another task if it was previously linked there);
+    /// removals only fire for ids that were on the original list and are
+    /// no longer present.
+    fn sync_session_links(
+        &self,
+        task_id: i64,
+        orig: &[String],
+        new: &[String],
+    ) -> anyhow::Result<()> {
+        for sid in new {
+            if !orig.iter().any(|o| o == sid) {
+                crate::db::link_session(&self.conn, task_id, sid)?;
+            }
+        }
+        for sid in orig {
+            if !new.iter().any(|n| n == sid) {
+                crate::db::unlink_session(&self.conn, sid)?;
+            }
+        }
+        Ok(())
     }
 
     fn handle_help(&mut self, key: KeyEvent) {
@@ -546,6 +584,9 @@ impl App {
             }
             EditField::Deps => {
                 let _ = state.deps.handle_event(&event);
+            }
+            EditField::Sessions => {
+                let _ = state.sessions.handle_event(&event);
             }
             EditField::Body => {
                 state.body.input(event);

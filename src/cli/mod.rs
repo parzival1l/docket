@@ -206,6 +206,18 @@ pub enum SessionCommand {
         /// Session id
         session_id: String,
     },
+    /// Replace stale `docket-T-N-<ts>` placeholders (written by old
+    /// `docket start --tmux` before the `--session-id` fix) with the real
+    /// claude session uuid. Matches transcripts by the `# Task T-N:` header
+    /// docket always assembles into the prompt.
+    Reconcile {
+        /// Most-recent transcripts to inspect per task (default: 3).
+        #[arg(long, default_value_t = 3)]
+        limit: usize,
+        /// Report matches without writing to the db.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -291,6 +303,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             SessionCommand::Unlink { session_id } => session::unlink(session_id),
             SessionCommand::Show { session_id, json } => session::show(session_id, json),
             SessionCommand::Open { session_id } => session::open(session_id, false),
+            SessionCommand::Reconcile { limit, dry_run } => session::reconcile(limit, dry_run),
         },
         Command::Group { action } => match action {
             GroupCommand::New {

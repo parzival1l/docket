@@ -18,16 +18,30 @@ pub enum EditField {
     Kind,
     Group,
     Deps,
+    /// Comma-separated linked agent session ids. Only navigable in Edit mode —
+    /// linking requires a persisted task id.
+    Sessions,
     Body,
     Acceptance,
 }
 
-pub const FIELD_ORDER: [EditField; 7] = [
+const FIELD_ORDER_ADD: [EditField; 7] = [
     EditField::Title,
     EditField::Priority,
     EditField::Kind,
     EditField::Group,
     EditField::Deps,
+    EditField::Body,
+    EditField::Acceptance,
+];
+
+const FIELD_ORDER_EDIT: [EditField; 8] = [
+    EditField::Title,
+    EditField::Priority,
+    EditField::Kind,
+    EditField::Group,
+    EditField::Deps,
+    EditField::Sessions,
     EditField::Body,
     EditField::Acceptance,
 ];
@@ -40,18 +54,19 @@ pub struct EditState {
     pub kind: String,
     pub group: Input,
     pub deps: Input,
+    /// Comma-separated linked agent session ids. Editable in Edit mode; the
+    /// save flow diffs against `orig_sessions` and calls `link_session` /
+    /// `unlink_session` for the additions and removals.
+    pub sessions: Input,
     pub body: TextArea<'static>,
     pub acceptance: TextArea<'static>,
     pub error: Option<String>,
-    /// Read-only mirror of the linked agent sessions for this task. Surfaced
-    /// in the edit modal so users can see which Claude/Codex runs touched the
-    /// task; not editable here — use `docket session link/unlink`.
-    pub agent_sessions: Vec<String>,
     orig_title: String,
     orig_priority: String,
     orig_kind: String,
     orig_group: String,
     orig_deps: String,
+    orig_sessions: String,
     orig_body: String,
     orig_acceptance: String,
 }
@@ -66,6 +81,7 @@ impl std::fmt::Debug for EditState {
             .field("kind", &self.kind)
             .field("group", &self.group.value())
             .field("deps", &self.deps.value())
+            .field("sessions", &self.sessions.value())
             .field("body", &self.body.lines().join("\n"))
             .field("acceptance", &self.acceptance.lines().join("\n"))
             .field("error", &self.error)
@@ -75,7 +91,7 @@ impl std::fmt::Debug for EditState {
 
 impl EditState {
     pub fn for_add() -> Self {
-        Self::build(EditMode::Add, "", "", "feature", "", "", "", "", vec![])
+        Self::build(EditMode::Add, "", "", "feature", "", "", "", "", "")
     }
 
     pub fn for_edit(task: &Task) -> Self {
@@ -85,6 +101,7 @@ impl EditState {
             .map(|d| fmt_id(*d))
             .collect::<Vec<_>>()
             .join(", ");
+        let sessions_str = task.agent_sessions.join(", ");
         Self::build(
             EditMode::Edit { id: task.id },
             &task.title,
@@ -94,7 +111,7 @@ impl EditState {
             &deps_str,
             task.body.as_deref().unwrap_or(""),
             task.acceptance.as_deref().unwrap_or(""),
-            task.agent_sessions.clone(),
+            &sessions_str,
         )
     }
 
@@ -108,7 +125,7 @@ impl EditState {
         deps: &str,
         body: &str,
         acceptance: &str,
-        agent_sessions: Vec<String>,
+        sessions: &str,
     ) -> Self {
         let body_lines: Vec<String> = if body.is_empty() {
             vec![String::new()]
@@ -132,18 +149,38 @@ impl EditState {
             kind: kind.to_string(),
             group: Input::default().with_value(group.to_string()),
             deps: Input::default().with_value(deps.to_string()),
+            sessions: Input::default().with_value(sessions.to_string()),
             body: body_ta,
             acceptance: acc_ta,
             error: None,
-            agent_sessions,
             orig_title: title.to_string(),
             orig_priority: priority.to_string(),
             orig_kind: kind.to_string(),
             orig_group: group.to_string(),
             orig_deps: deps.to_string(),
+            orig_sessions: sessions.to_string(),
             orig_body: body.to_string(),
             orig_acceptance: acceptance.to_string(),
         }
+    }
+
+    fn field_order(&self) -> &'static [EditField] {
+        match self.mode {
+            EditMode::Add => &FIELD_ORDER_ADD,
+            EditMode::Edit { .. } => &FIELD_ORDER_EDIT,
+        }
+    }
+
+    /// Parsed, deduplicated session ids from the current input value. Empty
+    /// entries are dropped; order is preserved (first occurrence wins).
+    pub fn sessions_list(&self) -> Vec<String> {
+        parse_sessions(self.sessions.value())
+    }
+
+    /// Original session ids the form was opened with — used by the save path
+    /// to compute additions vs removals against the linked-session table.
+    pub fn orig_sessions_list(&self) -> Vec<String> {
+        parse_sessions(&self.orig_sessions)
     }
 
     /// Cycle to the next kind in the vocabulary. Wraps around.
@@ -192,7 +229,11 @@ impl EditState {
                         .map(|e| format!("deps: {}", e))
                 }
             }
-            EditField::Kind | EditField::Group | EditField::Body | EditField::Acceptance => None,
+            EditField::Kind
+            | EditField::Group
+            | EditField::Sessions
+            | EditField::Body
+            | EditField::Acceptance => None,
         }
     }
 
@@ -202,25 +243,36 @@ impl EditState {
             || self.kind != self.orig_kind
             || self.group.value() != self.orig_group
             || self.deps.value() != self.orig_deps
+            || self.sessions.value() != self.orig_sessions
             || self.body.lines().join("\n") != self.orig_body
             || self.acceptance.lines().join("\n") != self.orig_acceptance
     }
 
     pub fn next_field(&mut self) {
-        let idx = FIELD_ORDER
-            .iter()
-            .position(|f| *f == self.field)
-            .unwrap_or(0);
-        self.field = FIELD_ORDER[(idx + 1) % FIELD_ORDER.len()];
+        let order = self.field_order();
+        let idx = order.iter().position(|f| *f == self.field).unwrap_or(0);
+        self.field = order[(idx + 1) % order.len()];
     }
 
     pub fn prev_field(&mut self) {
-        let idx = FIELD_ORDER
-            .iter()
-            .position(|f| *f == self.field)
-            .unwrap_or(0);
-        self.field = FIELD_ORDER[(idx + FIELD_ORDER.len() - 1) % FIELD_ORDER.len()];
+        let order = self.field_order();
+        let idx = order.iter().position(|f| *f == self.field).unwrap_or(0);
+        self.field = order[(idx + order.len() - 1) % order.len()];
     }
+}
+
+fn parse_sessions(raw: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for part in raw.split(',') {
+        let s = part.trim();
+        if s.is_empty() {
+            continue;
+        }
+        if !out.iter().any(|e| e == s) {
+            out.push(s.to_string());
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -300,7 +352,9 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
     use ratatui::text::{Line, Span};
     use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
-    let area = centered_rect(80, 30, frame.area());
+    let show_sessions_row = matches!(state.mode, EditMode::Edit { .. });
+    let modal_h: u16 = if show_sessions_row { 32 } else { 30 };
+    let area = centered_rect(80, modal_h, frame.area());
     frame.render_widget(Clear, area);
 
     let title_bar = match state.mode {
@@ -315,18 +369,17 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
 
-    let show_sessions_row = matches!(state.mode, EditMode::Edit { .. });
-    let sessions_row_h: u16 = if show_sessions_row { 1 } else { 0 };
+    let sessions_row_h: u16 = if show_sessions_row { 3 } else { 0 };
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(3),
             Constraint::Length(sessions_row_h),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
             Constraint::Length(6),
             Constraint::Length(6),
             Constraint::Length(1),
@@ -334,33 +387,9 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
         ])
         .split(inner);
 
-    if show_sessions_row {
-        let line = if state.agent_sessions.is_empty() {
-            Line::from(vec![
-                Span::styled(
-                    "Sessions: ",
-                    Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    "(none — link via `docket session link`)",
-                    Style::default().fg(Color::DarkGray),
-                ),
-            ])
-        } else {
-            Line::from(vec![
-                Span::styled(
-                    "Sessions: ",
-                    Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(state.agent_sessions.join(", ")),
-            ])
-        };
-        frame.render_widget(Paragraph::new(line), rows[0]);
-    }
-
     render_input_row(
         frame,
-        rows[1],
+        rows[0],
         "Title",
         "task title",
         &state.title,
@@ -368,7 +397,7 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
     );
     render_input_row(
         frame,
-        rows[2],
+        rows[1],
         "Priority",
         "0..4 (default 2)",
         &state.priority,
@@ -376,13 +405,13 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
     );
     render_kind_row(
         frame,
-        rows[3],
+        rows[2],
         &state.kind,
         state.field == EditField::Kind,
     );
     render_input_row(
         frame,
-        rows[4],
+        rows[3],
         "Group",
         "optional, e.g. v0.1",
         &state.group,
@@ -390,12 +419,22 @@ pub fn render(frame: &mut ratatui::Frame, state: &EditState) {
     );
     render_input_row(
         frame,
-        rows[5],
+        rows[4],
         "Deps",
         "T-3, T-5 (optional)",
         &state.deps,
         state.field == EditField::Deps,
     );
+    if show_sessions_row {
+        render_input_row(
+            frame,
+            rows[5],
+            "Sessions",
+            "session-id-1, session-id-2",
+            &state.sessions,
+            state.field == EditField::Sessions,
+        );
+    }
     render_textarea_row(
         frame,
         rows[6],
@@ -509,7 +548,7 @@ fn render_input_row(
     input: &Input,
     focused: bool,
 ) {
-    use ratatui::layout::{Constraint, Direction, Layout};
+    use ratatui::layout::{Constraint, Direction, Layout, Position};
     use ratatui::style::{Color, Modifier, Style};
     use ratatui::text::Span;
     use ratatui::widgets::{Block, Borders, Paragraph};
@@ -534,8 +573,8 @@ fn render_input_row(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(border_style);
-    let width = cols[1].width.saturating_sub(2) as usize;
-    let scroll = input.visual_scroll(width);
+    let inner_width = cols[1].width.saturating_sub(2) as usize;
+    let scroll = input.visual_scroll(inner_width);
 
     let p = if input.value().is_empty() && !placeholder.is_empty() {
         Paragraph::new(Span::styled(
@@ -549,6 +588,16 @@ fn render_input_row(
             .block(block)
     };
     frame.render_widget(p, cols[1]);
+
+    if focused {
+        // `tui_input` doesn't draw its own caret — surface the terminal cursor
+        // inside the bordered cell so single-line fields blink the same way
+        // TextArea does for Body/Acceptance.
+        let cursor_col = input.visual_cursor().saturating_sub(scroll) as u16;
+        let x = cols[1].x + 1 + cursor_col.min(inner_width.saturating_sub(1) as u16);
+        let y = cols[1].y + 1;
+        frame.set_cursor_position(Position::new(x, y));
+    }
 }
 
 fn render_textarea_row(
@@ -640,7 +689,7 @@ mod tests {
             kind: "feature".into(),
             created_at: "t".into(),
             updated_at: "t".into(),
-            agent_sessions: vec![],
+            agent_sessions: vec!["sess-a".into(), "sess-b".into()],
         };
         let s = EditState::for_edit(&task);
         assert_eq!(s.mode, EditMode::Edit { id: 7 });
@@ -648,9 +697,70 @@ mod tests {
         assert_eq!(s.priority.value(), "1");
         assert_eq!(s.group.value(), "v0.1");
         assert_eq!(s.deps.value(), "T-3, T-5");
+        assert_eq!(s.sessions.value(), "sess-a, sess-b");
         assert_eq!(s.body.lines().join("\n"), "line1\nline2");
         assert_eq!(s.acceptance.lines().join("\n"), "- check x");
         assert!(!s.is_dirty());
+    }
+
+    #[test]
+    fn sessions_field_is_navigable_only_in_edit_mode() {
+        // Add mode: Deps -> Body (skips Sessions).
+        let mut s = EditState::for_add();
+        s.field = EditField::Deps;
+        s.next_field();
+        assert_eq!(s.field, EditField::Body);
+
+        // Edit mode: Deps -> Sessions -> Body.
+        let task = Task {
+            id: 7,
+            title: "hello".into(),
+            body: None,
+            acceptance: None,
+            deps: vec![],
+            status: "open".into(),
+            priority: 2,
+            group: None,
+            kind: "feature".into(),
+            created_at: "t".into(),
+            updated_at: "t".into(),
+            agent_sessions: vec![],
+        };
+        let mut s = EditState::for_edit(&task);
+        s.field = EditField::Deps;
+        s.next_field();
+        assert_eq!(s.field, EditField::Sessions);
+        s.next_field();
+        assert_eq!(s.field, EditField::Body);
+    }
+
+    #[test]
+    fn sessions_list_parses_dedupes_and_trims() {
+        let mut s = EditState::for_add();
+        s.sessions = Input::default().with_value("a, b ,a, , c".into());
+        assert_eq!(s.sessions_list(), vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn dirty_after_changing_sessions() {
+        let task = Task {
+            id: 1,
+            title: "t".into(),
+            body: None,
+            acceptance: None,
+            deps: vec![],
+            status: "open".into(),
+            priority: 2,
+            group: None,
+            kind: "feature".into(),
+            created_at: "t".into(),
+            updated_at: "t".into(),
+            agent_sessions: vec!["a".into()],
+        };
+        let mut s = EditState::for_edit(&task);
+        assert!(!s.is_dirty());
+        s.sessions = Input::default().with_value("a, b".into());
+        assert!(s.is_dirty());
     }
 
     #[test]

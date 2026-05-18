@@ -106,6 +106,87 @@ fn cwd_project_dir(projects: &PathBuf) -> Option<PathBuf> {
     }
 }
 
+/// If `session_id` is a `docket start --tmux` placeholder shaped
+/// `docket-T-<N>-<digits>`, return `<N>`. Otherwise None.
+pub fn placeholder_task_id(session_id: &str) -> Option<i64> {
+    let rest = session_id.strip_prefix("docket-T-")?;
+    let dash = rest.find('-')?;
+    let id_str = &rest[..dash];
+    let ts_str = &rest[dash + 1..];
+    if id_str.is_empty() || !id_str.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    if ts_str.is_empty() || !ts_str.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    id_str.parse::<i64>().ok()
+}
+
+/// Scan the current repo's Claude project dir for a transcript whose first
+/// user turn starts with `# Task T-{task_id}:` — the prompt header docket
+/// always assembles. Limits to the `limit` most recently modified `.jsonl`
+/// files to keep this fast and to avoid false positives from stale sessions.
+/// Returns the file stem (a UUID) on match.
+pub fn find_session_uuid_for_task(task_id: i64, limit: usize) -> Option<String> {
+    let projects = projects_root()?;
+    let dir = cwd_project_dir(&projects)?;
+    let mut candidates: Vec<(PathBuf, SystemTime)> = fs::read_dir(&dir)
+        .ok()?
+        .flatten()
+        .filter_map(|entry| {
+            let p = entry.path();
+            if p.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+                return None;
+            }
+            let mtime = fs::metadata(&p).ok()?.modified().ok()?;
+            Some((p, mtime))
+        })
+        .collect();
+    candidates.sort_by(|a, b| b.1.cmp(&a.1));
+    candidates.truncate(limit);
+
+    let marker = format!("# Task T-{}:", task_id);
+    for (path, _) in candidates {
+        if transcript_first_user_starts_with(&path, &marker) {
+            return path.file_stem().and_then(|s| s.to_str()).map(String::from);
+        }
+    }
+    None
+}
+
+fn transcript_first_user_starts_with(path: &PathBuf, marker: &str) -> bool {
+    let content = match fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    for line in content.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        let v: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if v.get("type").and_then(|t| t.as_str()) != Some("user") {
+            continue;
+        }
+        let content = v.pointer("/message/content");
+        // String form: "content": "# Task T-13: ..."
+        if let Some(s) = content.and_then(|c| c.as_str()) {
+            return s.trim_start().starts_with(marker);
+        }
+        // Array form: "content": [{"type":"text","text":"# Task T-13: ..."}, ...]
+        if let Some(arr) = content.and_then(|c| c.as_array()) {
+            let first_text = arr
+                .iter()
+                .find_map(|block| block.get("text").and_then(|t| t.as_str()));
+            return first_text.map(|t| t.trim_start().starts_with(marker)).unwrap_or(false);
+        }
+        return false;
+    }
+    false
+}
+
 /// Single-pass scan: pick the last `ai-title.aiTitle` and count user turns.
 fn scan_transcript(path: &PathBuf) -> (Option<String>, Option<usize>) {
     let content = match fs::read_to_string(path) {
@@ -167,6 +248,48 @@ mod tests {
         assert_eq!(relative_ago(now - chrono::Duration::seconds(90), now), "1m ago");
         assert_eq!(relative_ago(now - chrono::Duration::seconds(3700), now), "1h ago");
         assert_eq!(relative_ago(now - chrono::Duration::seconds(90_000), now), "1d ago");
+    }
+
+    #[test]
+    fn placeholder_task_id_matches_docket_t_name() {
+        assert_eq!(placeholder_task_id("docket-T-13-1779042263909646000"), Some(13));
+        assert_eq!(placeholder_task_id("docket-T-1-0"), Some(1));
+    }
+
+    #[test]
+    fn placeholder_task_id_rejects_uuids_and_other_shapes() {
+        assert_eq!(placeholder_task_id("8dd9c00b-4644-42fe-9fdb-1f0dbc27f436"), None);
+        assert_eq!(placeholder_task_id("docket-T-13"), None);
+        assert_eq!(placeholder_task_id("docket-T--123"), None);
+        assert_eq!(placeholder_task_id("docket-T-13-abc"), None);
+        assert_eq!(placeholder_task_id("docket-open-12345678-1779"), None);
+        assert_eq!(placeholder_task_id(""), None);
+    }
+
+    #[test]
+    fn first_user_marker_detected_string_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("abc.jsonl");
+        std::fs::write(
+            &p,
+            "{\"type\":\"summary\",\"x\":1}\n\
+             {\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"# Task T-13: do the thing\\n\\nmore\"}}\n",
+        )
+        .unwrap();
+        assert!(transcript_first_user_starts_with(&p, "# Task T-13:"));
+        assert!(!transcript_first_user_starts_with(&p, "# Task T-14:"));
+    }
+
+    #[test]
+    fn first_user_marker_detected_array_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("abc.jsonl");
+        std::fs::write(
+            &p,
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"# Task T-7: hi\"}]}}\n",
+        )
+        .unwrap();
+        assert!(transcript_first_user_starts_with(&p, "# Task T-7:"));
     }
 
     #[test]

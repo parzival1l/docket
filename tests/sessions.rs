@@ -358,6 +358,23 @@ exit 0\n",
 }
 
 #[cfg(unix)]
+impl FakeTmux {
+    /// Each logged line is "CALL\t<arg0>\t<arg1>\t..." — return one Vec per call.
+    fn calls(&self) -> Vec<Vec<String>> {
+        let raw = fs::read_to_string(&self.log_path).unwrap_or_default();
+        raw.lines()
+            .filter_map(|line| {
+                let mut parts = line.split('\t');
+                if parts.next() != Some("CALL") {
+                    return None;
+                }
+                Some(parts.map(String::from).collect())
+            })
+            .collect()
+    }
+}
+
+#[cfg(unix)]
 impl Drop for FakeTmux {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.bin_dir);
@@ -375,6 +392,178 @@ fn run_with_tmux(repo: &TestRepo, args: &[&str], fake: &FakeTmux) -> Output {
         .env("TMUX", "/tmp/fake-tmux-socket,12345,0")
         .output()
         .unwrap()
+}
+
+/// `docket session reconcile`: place a fake transcript in `$HOME/.claude/projects/<cwd-encoded>/<uuid>.jsonl`
+/// whose first `type:"user"` line starts with `# Task T-{N}:`, then assert the
+/// placeholder row for T-N is rewritten to `<uuid>`.
+#[test]
+fn session_reconcile_rewrites_placeholder_to_matching_uuid() {
+    let repo = TestRepo::new();
+    let id = repo.add("widget");
+    let n: i64 = id.trim_start_matches("T-").parse().unwrap();
+
+    // Seed a stale placeholder row exactly like old `docket start --tmux` would have.
+    let placeholder = format!("docket-T-{}-1779042263909646000", n);
+    let out = repo.run(&["session", "link", &id, &placeholder]);
+    assert!(out.status.success(), "link failed: {}", String::from_utf8_lossy(&out.stderr));
+
+    // Fake $HOME/.claude/projects/<cwd-encoded>/<uuid>.jsonl with a matching header.
+    let home = env::temp_dir().join(format!(
+        "docket-sess-reconcile-home-{}-{}",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    let encoded: String = repo
+        .dir
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .chars()
+        .map(|c| if c == '/' { '-' } else { c })
+        .collect();
+    let proj_dir = home.join(".claude").join("projects").join(&encoded);
+    fs::create_dir_all(&proj_dir).unwrap();
+    let real_uuid = "abcdef01-2345-4678-9abc-def012345678";
+    let transcript = proj_dir.join(format!("{}.jsonl", real_uuid));
+    let body = format!(
+        "{{\"type\":\"summary\",\"x\":1}}\n\
+         {{\"type\":\"user\",\"message\":{{\"role\":\"user\",\"content\":\"# Task T-{}: widget\\n\\n## Body\\nb\\n\"}}}}\n",
+        n
+    );
+    fs::write(&transcript, body).unwrap();
+
+    let out = Command::new(bin())
+        .args(["session", "reconcile"])
+        .current_dir(&repo.dir)
+        .env("HOME", &home)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "reconcile failed: stderr={} stdout={}",
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains(real_uuid) && stdout.contains(&placeholder),
+        "reconcile should report the rewrite; got:\n{}",
+        stdout
+    );
+
+    // The placeholder row should be gone, replaced by the real uuid.
+    let j = repo.show_json(&id);
+    let sessions: Vec<String> = j["agent_sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        !sessions.iter().any(|s| s == &placeholder),
+        "placeholder should be removed; got: {:?}",
+        sessions
+    );
+    assert!(
+        sessions.iter().any(|s| s == real_uuid),
+        "real uuid should be linked to the task; got: {:?}",
+        sessions
+    );
+
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// A docket-minted claude session id is a v4 UUID:
+/// `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx` (36 chars, 4 dashes, hex).
+#[cfg(unix)]
+fn looks_like_v4_uuid(s: &str) -> bool {
+    if s.len() != 36 {
+        return false;
+    }
+    let bytes = s.as_bytes();
+    for (i, b) in bytes.iter().enumerate() {
+        let want_dash = i == 8 || i == 13 || i == 18 || i == 23;
+        if want_dash {
+            if *b != b'-' {
+                return false;
+            }
+        } else if !b.is_ascii_hexdigit() {
+            return false;
+        }
+    }
+    bytes[14] == b'4'
+}
+
+#[cfg(unix)]
+#[test]
+fn start_tmux_links_uuid_shaped_session_id_not_tmux_name() {
+    let repo = TestRepo::new();
+    let id = repo.add("widget");
+
+    let fake = FakeTmux::new();
+    let out = run_with_tmux(&repo, &["start", &id, "--tmux"], &fake);
+    assert!(
+        out.status.success(),
+        "start --tmux failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let j = repo.show_json(&id);
+    let recorded = j["agent_sessions"][0].as_str().expect("session id present");
+    assert!(
+        looks_like_v4_uuid(recorded),
+        "linked session id must be a v4 uuid (so it matches the claude transcript filename); got: {:?}",
+        recorded
+    );
+    assert!(
+        !recorded.starts_with("docket-T-"),
+        "linked session id must NOT be the tmux placeholder name; got: {:?}",
+        recorded
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn start_tmux_send_keys_passes_session_id_uuid_to_claude() {
+    let repo = TestRepo::new();
+    let id = repo.add("widget");
+
+    let fake = FakeTmux::new();
+    let out = run_with_tmux(&repo, &["start", &id, "--tmux"], &fake);
+    assert!(out.status.success());
+
+    let calls = fake.calls();
+    let send_keys = calls
+        .iter()
+        .find(|c| c.first().map(|s| s.as_str()) == Some("send-keys"))
+        .expect("send-keys call expected");
+    let joined = send_keys.join(" ");
+    assert!(
+        joined.contains("claude --session-id "),
+        "send-keys command must invoke `claude --session-id <uuid>`; got: {:?}",
+        send_keys
+    );
+
+    // Pull the uuid argument out of the shell command and confirm it matches
+    // exactly what was linked.
+    let uuid = joined
+        .split_whitespace()
+        .skip_while(|tok| *tok != "--session-id")
+        .nth(1)
+        .expect("--session-id should have an argument");
+    assert!(
+        looks_like_v4_uuid(uuid),
+        "session id passed to claude must be a v4 uuid; got: {:?}",
+        uuid
+    );
+
+    let j = repo.show_json(&id);
+    let recorded = j["agent_sessions"][0].as_str().unwrap();
+    assert_eq!(
+        recorded, uuid,
+        "linked session id must equal the one we handed to claude --session-id"
+    );
 }
 
 #[cfg(unix)]
