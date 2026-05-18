@@ -2267,8 +2267,9 @@ mod tests {
         assert!(s.contains("Setup"));
         assert!(s.contains("step one"));
         assert!(s.contains("step two"));
-        // Bullet glyph replaces the leading `-`.
-        assert!(s.contains("•"), "bullets should render as `•`; got:\n{}", s);
+        // Bullets render as indented ASCII `-` (Unicode `•` was dropped
+        // because it caused column drift on Zed's terminal).
+        assert!(s.contains("  - step one"), "bullets should be `  - `; got:\n{}", s);
         // Bold marker is consumed.
         assert!(!s.contains("**"));
     }

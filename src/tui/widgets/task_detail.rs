@@ -79,12 +79,12 @@ pub fn render(
             }
             out.push(Line::from(""));
             if let Some(b) = &t.body {
-                out.push(section_header("▸ body"));
+                out.push(section_header("body"));
                 out.extend(markdown::render_block(b));
                 out.push(Line::from(""));
             }
             if let Some(a) = &t.acceptance {
-                out.push(section_header("▸ acceptance"));
+                out.push(section_header("acceptance"));
                 out.extend(markdown::render_block(a));
             }
             out

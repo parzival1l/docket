@@ -55,21 +55,20 @@ pub fn render_block(input: &str) -> Vec<Line<'static>> {
             continue;
         }
 
-        // Bullets. Nested bullets require ≥2 leading spaces.
+        // Bullets. Nested bullets require ≥2 leading spaces. Use ASCII
+        // glyphs only: `-` is unambiguously single-cell on every terminal,
+        // unlike `•`/`◦` (East-Asian-Width: Ambiguous), which causes column
+        // drift on terminals that treat ambiguous as double-width.
         let indent = raw.len() - trimmed_start.len();
         if let Some(rest) = trimmed_start
             .strip_prefix("- ")
             .or_else(|| trimmed_start.strip_prefix("* "))
         {
-            let (lead, glyph) = if indent >= 2 {
-                ("    ", "◦ ")
-            } else {
-                ("  ", "• ")
-            };
+            let lead = if indent >= 2 { "    " } else { "  " };
             let mut spans: Vec<Span<'static>> = Vec::new();
             spans.push(Span::raw(lead.to_string()));
             spans.push(Span::styled(
-                glyph.to_string(),
+                "- ".to_string(),
                 Style::default().add_modifier(Modifier::DIM),
             ));
             spans.extend(inline_spans(rest));
@@ -222,28 +221,39 @@ mod tests {
     }
 
     #[test]
-    fn bullet_renders_with_bullet_glyph() {
+    fn bullet_renders_with_ascii_dash_and_indent() {
         let out = render_block("- item");
         assert_eq!(out.len(), 1);
         let joined = line_text(&out[0]);
-        assert!(joined.contains("•"), "got {:?}", joined);
+        // Two-space indent then dim "- " then the item content. Using ASCII
+        // `-` instead of `•` avoids ambiguous-width drift on terminals that
+        // render U+2022 as double-width.
+        assert!(joined.starts_with("  - "), "got {:?}", joined);
         assert!(joined.contains("item"));
-        assert!(!joined.contains("- "));
+        // The dim bullet `- ` must be its own styled span (not joined onto
+        // the previous raw lead), so we can verify by checking spans.
+        let dim_span = out[0]
+            .spans
+            .iter()
+            .find(|s| s.style.add_modifier.contains(Modifier::DIM))
+            .expect("bullet glyph rendered as a DIM-styled span");
+        assert_eq!(dim_span.content, "- ");
     }
 
     #[test]
-    fn nested_bullet_uses_open_circle() {
+    fn nested_bullet_uses_deeper_indent() {
         let out = render_block("  - nested");
         let joined = line_text(&out[0]);
-        assert!(joined.contains("◦"), "got {:?}", joined);
+        assert!(joined.starts_with("    - "), "got {:?}", joined);
     }
 
     #[test]
     fn star_bullet_also_renders() {
         let out = render_block("* alt");
         let joined = line_text(&out[0]);
-        assert!(joined.contains("•"));
+        assert!(joined.starts_with("  - "));
         assert!(joined.contains("alt"));
+        // Source `*` is consumed; only the rendered dash remains.
         assert!(!joined.contains("*"));
     }
 
@@ -320,7 +330,7 @@ mod tests {
     fn bullet_with_inline_bold_renders_both() {
         let out = render_block("- task with **emphasis**");
         let joined = line_text(&out[0]);
-        assert!(joined.contains("•"));
+        assert!(joined.starts_with("  - "));
         assert!(joined.contains("emphasis"));
         assert!(!joined.contains("**"));
     }
